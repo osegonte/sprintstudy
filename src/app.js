@@ -1,5 +1,3 @@
-
-// src/app.js
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -9,6 +7,9 @@ require('dotenv').config();
 const authRoutes = require('./routes/auth');
 const documentRoutes = require('./routes/documents');
 const progressRoutes = require('./routes/progress');
+const sprintRoutes = require('./routes/sprints');
+const analyticsRoutes = require('./routes/analytics');
+const sessionRoutes = require('./routes/sessions');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -33,13 +34,21 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
+  res.status(200).json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    version: '2.0.0',
+    features: ['sprint_tracking', 'analytics', 'gamification']
+  });
 });
 
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/progress', progressRoutes);
+app.use('/api/sprints', sprintRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/sessions', sessionRoutes);
 
 // Error handling middleware
 app.use((error, req, res, next) => {
@@ -58,8 +67,9 @@ app.use('*', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Study Planner API running on port ${PORT}`);
-  console.log(`Health check available at: http://localhost:${PORT}/health`);
+  console.log(`🚀 SprintStudy API v2.0 running on port ${PORT}`);
+  console.log(`📊 Features: Sprint Tracking, Analytics, Gamification`);
+  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
 });
 
 module.exports = app;
