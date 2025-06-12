@@ -28,24 +28,44 @@ export const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [showSprintTest, setShowSprintTest] = useState(false);
+  const [debugInfo, setDebugInfo] = useState<string>('');
 
   useEffect(() => {
     loadDashboardData();
     loadDocuments();
+    checkAuthStatus();
   }, []);
 
+  const checkAuthStatus = () => {
+    const token = localStorage.getItem('token');
+    const user = localStorage.getItem('user');
+    console.log('🔐 Auth Status Check:');
+    console.log('Token exists:', !!token);
+    console.log('Token preview:', token ? token.substring(0, 20) + '...' : 'None');
+    console.log('User data:', user ? JSON.parse(user) : 'None');
+    setDebugInfo(`Token: ${!!token}, User: ${!!user}`);
+  };
+
   const loadDashboardData = async () => {
+    console.log('📊 Loading dashboard data...');
     const result = await api.getDashboardData();
+    console.log('Dashboard result:', result);
     if (result.success) {
       setDashboardData(result.data);
+    } else {
+      console.error('Dashboard error:', result.error);
     }
     setLoading(false);
   };
 
   const loadDocuments = async () => {
+    console.log('📚 Loading documents...');
     const result = await api.getDocuments();
+    console.log('Documents result:', result);
     if (result.success) {
       setDocuments(result.data.documents || []);
+    } else {
+      console.error('Documents error:', result.error);
     }
   };
 
@@ -53,22 +73,133 @@ export const Dashboard: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    console.log('📁 File Upload Debug:');
+    console.log('File:', file);
+    console.log('File name:', file.name);
+    console.log('File type:', file.type);
+    console.log('File size:', file.size, 'bytes (', (file.size / 1024 / 1024).toFixed(2), 'MB)');
+
+    // Check file type
     if (file.type !== 'application/pdf') {
+      const error = `Invalid file type: ${file.type}. Expected: application/pdf`;
+      console.error('❌', error);
       toast.error('Please upload a PDF file');
       return;
     }
 
-    setUploading(true);
-    const result = await api.uploadDocument(file);
-    
-    if (result.success) {
-      toast.success('PDF uploaded successfully!');
-      loadDocuments();
-      loadDashboardData();
-    } else {
-      toast.error(result.error || 'Upload failed');
+    // Check file size (50MB limit)
+    const maxSize = 50 * 1024 * 1024; // 50MB
+    if (file.size > maxSize) {
+      const error = `File too large: ${(file.size / 1024 / 1024).toFixed(2)}MB. Max: 50MB`;
+      console.error('❌', error);
+      toast.error(`File too large. Maximum size is 50MB.`);
+      return;
     }
-    setUploading(false);
+
+    // Check authentication
+    const token = localStorage.getItem('token');
+    if (!token) {
+      console.error('❌ No authentication token found');
+      toast.error('Please log in again');
+      return;
+    }
+
+    console.log('✅ Pre-upload checks passed');
+    console.log('🚀 Starting upload...');
+
+    setUploading(true);
+    
+    try {
+      // Enhanced upload with detailed logging
+      const result = await uploadWithDebug(file);
+      
+      if (result.success) {
+        console.log('✅ Upload successful:', result.data);
+        toast.success('PDF uploaded successfully!');
+        loadDocuments();
+        loadDashboardData();
+      } else {
+        console.error('❌ Upload failed:', result.error);
+        toast.error(result.error || 'Upload failed');
+      }
+    } catch (error) {
+      console.error('❌ Upload exception:', error);
+      toast.error('Upload failed - check console for details');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // Enhanced upload function with detailed debugging
+  const uploadWithDebug = async (file: File) => {
+    const API_BASE_URL = 'https://sprintstudy-production.up.railway.app';
+    const token = localStorage.getItem('token');
+    
+    console.log('🔗 Upload URL:', `${API_BASE_URL}/api/documents/upload`);
+    
+    const formData = new FormData();
+    formData.append('pdf', file);
+    formData.append('title', file.name);
+    
+    console.log('📤 FormData contents:');
+    for (let [key, value] of formData.entries()) {
+      console.log(`  ${key}:`, value);
+    }
+    
+    const headers = {
+      'Authorization': `Bearer ${token}`
+      // Don't set Content-Type for FormData - let browser set it with boundary
+    };
+    
+    console.log('📋 Request headers:', headers);
+    
+    try {
+      console.log('⏳ Making fetch request...');
+      const response = await fetch(`${API_BASE_URL}/api/documents/upload`, {
+        method: 'POST',
+        headers,
+        body: formData
+      });
+      
+      console.log('📥 Response received:');
+      console.log('  Status:', response.status);
+      console.log('  StatusText:', response.statusText);
+      console.log('  Headers:', [...response.headers.entries()]);
+      
+      // Get response text first
+      const responseText = await response.text();
+      console.log('📄 Raw response:', responseText);
+      
+      // Try to parse as JSON
+      let data;
+      try {
+        data = responseText ? JSON.parse(responseText) : {};
+        console.log('📊 Parsed data:', data);
+      } catch (parseError) {
+        console.error('❌ JSON parse error:', parseError);
+        return {
+          success: false,
+          error: `Invalid JSON response: ${responseText}`
+        };
+      }
+      
+      if (!response.ok) {
+        console.error('❌ HTTP error:', response.status, data);
+        return {
+          success: false,
+          error: data.error || data.message || `HTTP ${response.status}: ${response.statusText}`
+        };
+      }
+      
+      return { success: true, data };
+      
+    } catch (networkError) {
+      console.error('❌ Network error:', networkError);
+      return {
+        success: false,
+        error: `Network error: ${networkError.message}`
+      };
+    }
   };
 
   const handleLogout = async () => {
@@ -109,6 +240,7 @@ export const Dashboard: React.FC = () => {
           <div>
             <h1 className="text-2xl font-bold text-gray-900">📚 SprintStudy</h1>
             <p className="text-gray-600">Welcome back, {user?.username || user?.email}!</p>
+            <p className="text-xs text-gray-400">Debug: {debugInfo}</p>
           </div>
           <div className="flex items-center space-x-4">
             <button
@@ -130,6 +262,17 @@ export const Dashboard: React.FC = () => {
       </header>
 
       <div className="max-w-6xl mx-auto px-4 py-8">
+        {/* Debug Info Panel */}
+        <div className="card mb-6 bg-blue-50 border border-blue-200">
+          <h3 className="font-semibold text-blue-800 mb-2">🔍 Upload Debug Info</h3>
+          <p className="text-sm text-blue-700">
+            If upload fails, check your browser's DevTools Console (F12) for detailed error logs.
+          </p>
+          <p className="text-xs text-blue-600 mt-1">
+            Expected: PDF files up to 50MB • Backend: https://sprintstudy-production.up.railway.app
+          </p>
+        </div>
+
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <div className="card">
@@ -186,38 +329,19 @@ export const Dashboard: React.FC = () => {
           </div>
         )}
 
-        {/* Today's Sprint */}
-        {dashboardData?.today_sprint && (
-          <div className="card mb-8">
-            <h2 className="text-xl font-bold mb-4">🎯 Today's Sprint</h2>
-            <div className="bg-blue-50 rounded-xl p-4">
-              <h3 className="font-semibold">{dashboardData.today_sprint.documents?.title}</h3>
-              <p className="text-gray-600 mb-2">
-                Pages {dashboardData.today_sprint.start_page}-{dashboardData.today_sprint.end_page} • 
-                Est. {formatTime(dashboardData.today_sprint.estimated_time_seconds)}
-              </p>
-              <div className="w-full bg-gray-200 rounded-full h-3 mb-4">
-                <div 
-                  className="bg-blue-500 h-3 rounded-full transition-all duration-500"
-                  style={{ width: `${(dashboardData.today_sprint.actual_time_seconds / dashboardData.today_sprint.estimated_time_seconds) * 100}%` }}
-                />
-              </div>
-              <button className="btn-primary">
-                Continue Sprint
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Upload Section */}
+        {/* Upload Section with Enhanced Debugging */}
         <div className="card mb-8">
           <h2 className="text-xl font-bold mb-4">📤 Upload New PDF</h2>
           <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center">
             <Upload className="mx-auto text-gray-400 mb-4" size={48} />
             <p className="text-gray-600 mb-4">Drag and drop your PDF file here or click to browse</p>
+            <p className="text-sm text-gray-500 mb-4">
+              Maximum file size: 50MB • Supported format: PDF only
+            </p>
+            
             <input
               type="file"
-              accept=".pdf"
+              accept=".pdf,application/pdf"
               onChange={handleFileUpload}
               disabled={uploading}
               className="hidden"
@@ -227,8 +351,21 @@ export const Dashboard: React.FC = () => {
               htmlFor="file-upload"
               className={`btn-primary cursor-pointer inline-block ${uploading ? 'opacity-50' : ''}`}
             >
-              {uploading ? 'Uploading...' : 'Choose PDF File'}
+              {uploading ? (
+                <span>
+                  Uploading... 
+                  <div className="inline-block ml-2 animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                </span>
+              ) : (
+                'Choose PDF File'
+              )}
             </label>
+            
+            {uploading && (
+              <p className="text-sm text-gray-500 mt-2">
+                Check console (F12) for upload progress...
+              </p>
+            )}
           </div>
         </div>
 
@@ -267,11 +404,15 @@ export const Dashboard: React.FC = () => {
                     </button>
                     <button 
                       onClick={async () => {
-                        const result = await api.deleteDocument(doc.id);
-                        if (result.success) {
-                          toast.success('Document deleted');
-                          loadDocuments();
-                          loadDashboardData();
+                        if (confirm('Are you sure you want to delete this document?')) {
+                          const result = await api.deleteDocument(doc.id);
+                          if (result.success) {
+                            toast.success('Document deleted');
+                            loadDocuments();
+                            loadDashboardData();
+                          } else {
+                            toast.error('Failed to delete document');
+                          }
                         }
                       }}
                       className="btn-secondary text-sm py-2 px-4"
