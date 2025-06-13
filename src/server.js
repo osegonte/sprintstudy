@@ -69,6 +69,11 @@ app.use('*', (req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
+app.use(cors({
+  origin: process.env.FRONTEND_URL || '*',
+  credentials: true
+}));
+
 app.listen(PORT, () => {
   console.log(`🚀 Study Planner API running on port ${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
