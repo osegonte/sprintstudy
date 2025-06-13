@@ -1,22 +1,39 @@
 {
   "name": "study-planner-backend",
-  "version": "1.0.0",
-  "description": "Clean Study Planner API with PDF tracking and sprint planning",
+  "version": "2.0.0",
+  "description": "Enhanced Study Planner API with PDF tracking, intelligent sprints, and comprehensive analytics",
   "main": "src/server.js",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "lint": "eslint src/**/*.js",
+    "health": "curl -f http://localhost:3000/health || exit 1",
+    "migrate": "echo \"Run the SQL migration in src/migrations/002_enhanced_features.sql manually in Supabase SQL Editor\"",
+    "setup": "npm install && echo \"\\n🎯 Setup complete! Don't forget to:\\n1. Update .env with your Supabase credentials\\n2. Run the database migration\\n3. Test with npm run dev\\n\""
   },
   "keywords": [
     "study",
     "pdf",
     "reading",
     "progress",
-    "api"
+    "api",
+    "education",
+    "analytics",
+    "sprints",
+    "achievements",
+    "gamification"
   ],
   "author": "Study Planner Team",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/study-planner-backend.git"
+  },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
     "cors": "^2.8.5",
@@ -28,6 +45,36 @@
     "pdf-parse": "^1.1.1"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
+    "nodemon": "^3.0.2",
+    "eslint": "^8.55.0"
+  },
+  "optionalDependencies": {},
+  "peerDependencies": {},
+  "eslintConfig": {
+    "env": {
+      "node": true,
+      "es2021": true
+    },
+    "extends": [
+      "eslint:recommended"
+    ],
+    "parserOptions": {
+      "ecmaVersion": 12,
+      "sourceType": "module"
+    },
+    "rules": {
+      "no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
+      "no-console": "off",
+      "prefer-const": "error",
+      "no-var": "error"
+    }
+  },
+  "nodemonConfig": {
+    "watch": ["src"],
+    "ext": "js,json",
+    "ignore": ["src/**/*.test.js"],
+    "env": {
+      "NODE_ENV": "development"
+    }
   }
 }
