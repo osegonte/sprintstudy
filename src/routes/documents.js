@@ -1,4 +1,3 @@
-// src/routes/documents.js
 const express = require('express');
 const multer = require('multer');
 const pdf = require('pdf-parse');
@@ -32,16 +31,20 @@ router.post('/upload', authMiddleware, upload.single('pdf'), async (req, res) =>
     const { title } = req.body;
     const userId = req.user.id;
     
+    console.log(`📤 Processing PDF upload for user ${userId}`);
+    
     // Parse PDF to get page count
     const pdfData = await pdf(req.file.buffer);
     const totalPages = pdfData.numpages;
+    
+    console.log(`📊 PDF parsed: ${totalPages} pages`);
 
     // Generate unique filename
     const fileName = `${userId}/${Date.now()}_${req.file.originalname}`;
 
     // Upload file to Supabase Storage
     const { data: storageData, error: storageError } = await supabase.storage
-      .from('pdfs')
+      .from('pdf-documents')
       .upload(fileName, req.file.buffer, {
         contentType: 'application/pdf',
         upsert: false
@@ -49,15 +52,17 @@ router.post('/upload', authMiddleware, upload.single('pdf'), async (req, res) =>
 
     if (storageError) {
       console.error('Storage upload error:', storageError);
-      return res.status(500).json({ error: 'Failed to upload file' });
+      return res.status(500).json({ error: 'Failed to upload file to storage' });
     }
+
+    console.log(`💾 File uploaded to storage: ${storageData.path}`);
 
     // Save document metadata to database
     const { data: documentData, error: dbError } = await supabase
       .from('documents')
       .insert({
         user_id: userId,
-        title: title || req.file.originalname,
+        title: title || req.file.originalname.replace('.pdf', ''),
         file_name: req.file.originalname,
         file_path: storageData.path,
         total_pages: totalPages
@@ -68,9 +73,11 @@ router.post('/upload', authMiddleware, upload.single('pdf'), async (req, res) =>
     if (dbError) {
       console.error('Database insert error:', dbError);
       // Clean up uploaded file
-      await supabase.storage.from('pdfs').remove([fileName]);
+      await supabase.storage.from('pdf-documents').remove([fileName]);
       return res.status(500).json({ error: 'Failed to save document metadata' });
     }
+
+    console.log(`📝 Document saved to database: ${documentData.id}`);
 
     // Initialize pages tracking
     const pageInserts = Array.from({ length: totalPages }, (_, i) => ({
@@ -78,7 +85,7 @@ router.post('/upload', authMiddleware, upload.single('pdf'), async (req, res) =>
       user_id: userId,
       page_number: i + 1,
       time_spent_seconds: 0,
-      is_mastered: false
+      is_completed: false
     }));
 
     const { error: pagesError } = await supabase
@@ -87,11 +94,20 @@ router.post('/upload', authMiddleware, upload.single('pdf'), async (req, res) =>
 
     if (pagesError) {
       console.error('Pages insert error:', pagesError);
+      // Don't fail the whole operation if page tracking fails
     }
+
+    // Update user document count
+    await updateUserDocumentCount(userId);
 
     res.status(201).json({
       message: 'Document uploaded successfully',
-      document: documentData
+      document: {
+        id: documentData.id,
+        title: documentData.title,
+        total_pages: documentData.total_pages,
+        created_at: documentData.created_at
+      }
     });
 
   } catch (error) {
@@ -106,11 +122,16 @@ router.get('/', authMiddleware, async (req, res) => {
     const { data, error } = await supabase
       .from('documents')
       .select(`
-        *,
+        id,
+        title,
+        file_name,
+        total_pages,
+        created_at,
+        updated_at,
         document_pages (
           page_number,
           time_spent_seconds,
-          is_mastered,
+          is_completed,
           last_read_at
         )
       `)
@@ -125,17 +146,19 @@ router.get('/', authMiddleware, async (req, res) => {
     // Calculate progress for each document
     const documentsWithProgress = data.map(doc => {
       const totalPages = doc.total_pages;
-      const masteredPages = doc.document_pages.filter(page => page.is_mastered).length;
+      const completedPages = doc.document_pages.filter(page => page.is_completed).length;
       const totalTimeSpent = doc.document_pages.reduce((sum, page) => sum + page.time_spent_seconds, 0);
       
       return {
-        ...doc,
-        progress: {
-          total_pages: totalPages,
-          mastered_pages: masteredPages,
-          completion_percentage: totalPages > 0 ? (masteredPages / totalPages) * 100 : 0,
-          total_time_spent_seconds: totalTimeSpent
-        }
+        id: doc.id,
+        title: doc.title,
+        file_name: doc.file_name,
+        total_pages: totalPages,
+        completed_pages: completedPages,
+        completion_percentage: totalPages > 0 ? Math.round((completedPages / totalPages) * 100) : 0,
+        total_time_spent_seconds: totalTimeSpent,
+        created_at: doc.created_at,
+        updated_at: doc.updated_at
       };
     });
 
@@ -156,7 +179,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
         document_pages (
           page_number,
           time_spent_seconds,
-          is_mastered,
+          is_completed,
           last_read_at
         )
       `)
@@ -199,7 +222,7 @@ router.delete('/:id', authMiddleware, async (req, res) => {
 
     // Delete from storage
     const { error: storageError } = await supabase.storage
-      .from('pdfs')
+      .from('pdf-documents')
       .remove([document.file_path]);
 
     if (storageError) {
@@ -218,11 +241,34 @@ router.delete('/:id', authMiddleware, async (req, res) => {
       return res.status(500).json({ error: 'Failed to delete document' });
     }
 
+    // Update user document count
+    await updateUserDocumentCount(req.user.id);
+
     res.json({ message: 'Document deleted successfully' });
   } catch (error) {
     console.error('Delete document error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// Helper function to update user document count
+async function updateUserDocumentCount(userId) {
+  try {
+    const { count } = await supabase
+      .from('documents')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId);
+
+    await supabase
+      .from('user_stats')
+      .upsert({
+        user_id: userId,
+        total_documents: count || 0,
+        updated_at: new Date().toISOString()
+      });
+  } catch (error) {
+    console.error('Update document count error:', error);
+  }
+}
 
 module.exports = router;

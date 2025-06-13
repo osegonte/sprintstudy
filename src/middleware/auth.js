@@ -1,14 +1,15 @@
-// src/middleware/auth.js
 const { supabase } = require('../config/supabase');
 
 const authMiddleware = async (req, res, next) => {
   try {
-    const token = req.headers.authorization?.replace('Bearer ', '');
+    const authHeader = req.headers.authorization;
     
-    if (!token) {
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ error: 'No authorization token provided' });
     }
 
+    const token = authHeader.replace('Bearer ', '');
+    
     const { data: { user }, error } = await supabase.auth.getUser(token);
     
     if (error || !user) {

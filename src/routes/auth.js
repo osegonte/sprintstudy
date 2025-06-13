@@ -1,4 +1,3 @@
-// src/routes/auth.js
 const express = require('express');
 const { supabase } = require('../config/supabase');
 const authMiddleware = require('../middleware/auth');
@@ -10,12 +9,16 @@ router.post('/signup', async (req, res) => {
   try {
     const { email, password, username } = req.body;
 
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: {
-          username: username
+          username: username || email.split('@')[0]
         }
       }
     });
@@ -24,15 +27,28 @@ router.post('/signup', async (req, res) => {
       return res.status(400).json({ error: error.message });
     }
 
-    // Initialize user stats
+    // Create user profile
     if (data.user) {
+      const { error: profileError } = await supabase
+        .from('user_profiles')
+        .insert({
+          id: data.user.id,
+          username: username || email.split('@')[0]
+        });
+
+      if (profileError) {
+        console.error('Error creating user profile:', profileError);
+      }
+
+      // Initialize user stats
       const { error: statsError } = await supabase
         .from('user_stats')
         .insert({
           user_id: data.user.id,
-          average_reading_speed_seconds: 0,
           total_pages_read: 0,
-          total_time_spent_seconds: 0
+          total_time_spent_seconds: 0,
+          average_reading_speed_seconds: 0,
+          total_documents: 0
         });
 
       if (statsError) {
@@ -56,6 +72,10 @@ router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password
@@ -77,8 +97,29 @@ router.post('/login', async (req, res) => {
 });
 
 // Get current user
-router.get('/user', authMiddleware, async (req, res) => {
-  res.json({ user: req.user });
+router.get('/me', authMiddleware, async (req, res) => {
+  try {
+    // Get user profile
+    const { data: profile, error } = await supabase
+      .from('user_profiles')
+      .select('*')
+      .eq('id', req.user.id)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      console.error('Profile fetch error:', error);
+    }
+
+    res.json({ 
+      user: {
+        ...req.user,
+        username: profile?.username || req.user.user_metadata?.username
+      }
+    });
+  } catch (error) {
+    console.error('Get user error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // Sign out
