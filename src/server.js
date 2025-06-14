@@ -112,18 +112,28 @@ app.use('/api/documents/upload', uploadLimiter);
 app.use('/api/analytics', analyticsLimiter);
 app.use('/api', generalLimiter);
 
-// Body parsing middleware with size limits
-app.use(express.json({ 
-  limit: '10mb',
-  verify: (req, res, buf) => {
-    try {
-      JSON.parse(buf);
-    } catch (e) {
-      res.status(400).json({ error: 'Invalid JSON format' });
-      throw new Error('Invalid JSON');
-    }
+// Body parsing middleware with size limits - FIXED VERSION
+// Skip JSON parsing for file upload routes
+app.use((req, res, next) => {
+  // Skip JSON parsing for file uploads
+  if (req.path === '/api/documents/upload' || req.headers['content-type']?.includes('multipart/form-data')) {
+    return next();
   }
-}));
+  
+  // Apply JSON parsing for other routes
+  express.json({ 
+    limit: '10mb',
+    verify: (req, res, buf) => {
+      try {
+        JSON.parse(buf);
+      } catch (e) {
+        res.status(400).json({ error: 'Invalid JSON format' });
+        throw new Error('Invalid JSON');
+      }
+    }
+  })(req, res, next);
+});
+
 app.use(express.urlencoded({ 
   extended: true, 
   limit: '10mb' 
@@ -289,18 +299,6 @@ app.get('/api/version', (req, res) => {
   });
 });
 
-// API routes with proper middleware order
-app.use('/api/auth', authRoutes);
-app.use('/api/documents', documentRoutes);
-app.use('/api/progress', progressRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/sprints', sprintRoutes);
-app.use('/api/topics', topicsRoutes);
-app.use('/api/exam-goals', examGoalsRoutes);
-app.use('/api/achievements', achievementsRoutes);
-app.use('/api/analytics', analyticsRoutes);
-app.use('/api/sessions', sessionsRoutes);
-
 // API documentation endpoint
 app.get('/api/docs', (req, res) => {
   res.json({
@@ -429,8 +427,25 @@ app.get('/api/docs', (req, res) => {
   });
 });
 
-// Error handling middleware
+// API routes with proper middleware order
+app.use('/api/auth', authRoutes);
+app.use('/api/documents', documentRoutes);
+app.use('/api/progress', progressRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/sprints', sprintRoutes);
+app.use('/api/topics', topicsRoutes);
+app.use('/api/exam-goals', examGoalsRoutes);
+app.use('/api/achievements', achievementsRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/sessions', sessionsRoutes);
+
+// Error handling middleware - FIXED VERSION
 app.use((error, req, res, next) => {
+  // Check if response has already been sent
+  if (res.headersSent) {
+    return next(error);
+  }
+
   // Log error details
   console.error('Unhandled error:', {
     message: error.message,
@@ -458,6 +473,13 @@ app.use((error, req, res, next) => {
       error: 'Only PDF files are allowed',
       accepted_types: ['application/pdf'],
       code: 'INVALID_FILE_TYPE'
+    });
+  }
+
+  if (error.message === 'Invalid JSON') {
+    return res.status(400).json({
+      error: 'Invalid JSON in request body',
+      code: 'INVALID_JSON'
     });
   }
 

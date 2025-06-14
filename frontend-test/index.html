@@ -995,7 +995,9 @@
         const { useState, useEffect, useCallback, useRef, createContext, useContext } = React;
 
         // Configuration
-        const API_BASE_URL = 'http://localhost:3000';
+        const API_BASE_URL = window.location.hostname === 'localhost' 
+            ? 'http://localhost:3000' 
+            : 'https://sprintstudy-production.up.railway.app';
 
         const ROUTES = {
             DASHBOARD: 'dashboard',
@@ -1277,9 +1279,9 @@
             const [loading, setLoading] = useState(false);
             const [error, setError] = useState('');
             const [formData, setFormData] = useState({
-                email: 'test@example.com',
-                password: 'password123',
-                username: 'testuser'
+                email: '',
+                password: '',
+                username: ''
             });
 
             const handleSubmit = async (e) => {
@@ -1287,50 +1289,17 @@
                 setLoading(true);
                 setError('');
 
-                console.log('Attempting to authenticate with:', {
-                    endpoint: isLogin ? '/api/auth/login' : '/api/auth/signup',
-                    data: formData,
-                    url: API_BASE_URL
-                });
-
                 const endpoint = isLogin ? '/api/auth/login' : '/api/auth/signup';
-                
-                try {
-                    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify(formData)
-                    });
+                const { data, error } = await api.post(endpoint, formData);
 
-                    const data = await response.json();
-                    console.log('Response:', { status: response.status, data });
-
-                    if (!response.ok) {
-                        throw new Error(data.error || `HTTP ${response.status}`);
-                    }
-
-                    if (data.session?.access_token) {
-                        localStorage.setItem('token', data.session.access_token);
-                        onLogin(data.user);
-                    } else if (data.token) {
-                        localStorage.setItem('token', data.token);
-                        onLogin(data.user);
-                    } else {
-                        throw new Error('No access token received');
-                    }
-                } catch (err) {
-                    console.error('Auth error:', err);
-                    
-                    if (err.message.includes('Failed to fetch')) {
-                        setError('Cannot connect to server. Make sure your backend is running on http://localhost:3000');
-                    } else {
-                        setError(err.message);
-                    }
-                } finally {
-                    setLoading(false);
+                if (error) {
+                    setError(error);
+                } else {
+                    localStorage.setItem('token', data.session.access_token);
+                    onLogin(data.user);
                 }
+
+                setLoading(false);
             };
 
             const handleInputChange = (e) => {
@@ -1366,19 +1335,6 @@
                                 ⚠️ {error}
                             </div>
                         )}
-
-                        <div style={{ 
-                            background: 'rgba(72, 187, 120, 0.1)', 
-                            border: '1px solid var(--success)', 
-                            borderRadius: 'var(--radius)', 
-                            padding: 'var(--spacing-md)', 
-                            marginBottom: 'var(--spacing-lg)',
-                            fontSize: '0.9rem'
-                        }}>
-                            💡 <strong>Demo Account:</strong><br/>
-                            Email: test@example.com<br/>
-                            Password: password123
-                        </div>
 
                         <form onSubmit={handleSubmit}>
                             <div className="form-group">
@@ -1440,19 +1396,6 @@
                             >
                                 {isLogin ? 'Need an account? Sign Up' : 'Have an account? Sign In'}
                             </button>
-                        </div>
-
-                        <div style={{ 
-                            marginTop: 'var(--spacing-lg)', 
-                            padding: 'var(--spacing-sm)', 
-                            background: 'var(--bg-secondary)', 
-                            borderRadius: 'var(--radius)',
-                            fontSize: '0.8rem',
-                            color: 'var(--text-muted)',
-                            textAlign: 'center'
-                        }}>
-                            <strong>Backend Status:</strong> {API_BASE_URL}<br/>
-                            Make sure your backend server is running!
                         </div>
                     </div>
                 </div>
