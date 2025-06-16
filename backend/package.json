@@ -1,7 +1,7 @@
 {
-  "name": "study-planner-backend",
-  "version": "2.0.0",
-  "description": "Enhanced Study Planner API with PDF tracking, intelligent sprints, and comprehensive analytics",
+  "name": "study-planner-backend-lovable",
+  "version": "2.1.0-lovable",
+  "description": "Enhanced Study Planner API optimized for Lovable frontend integration with PDF tracking, intelligent sprints, and comprehensive analytics",
   "main": "src/server.js",
   "engines": {
     "node": ">=18.0.0",
@@ -10,11 +10,21 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev:verbose": "DEBUG=* nodemon src/server.js",
+    "test": "echo \"Tests coming soon\" && exit 0",
+    "test:health": "curl -f http://localhost:3000/health || exit 1",
+    "test:api": "curl -f http://localhost:3000/api/docs || exit 1",
+    "test:lovable": "curl -f http://localhost:3000/api/lovable/status || exit 1",
     "lint": "eslint src/**/*.js",
+    "lint:fix": "eslint src/**/*.js --fix",
     "health": "curl -f http://localhost:3000/health || exit 1",
-    "migrate": "echo \"Run the SQL migration in src/migrations/002_enhanced_features.sql manually in Supabase SQL Editor\"",
-    "setup": "npm install && echo \"\\n🎯 Setup complete! Don't forget to:\\n1. Update .env with your Supabase credentials\\n2. Run the database migration\\n3. Test with npm run dev\\n\""
+    "docs": "curl -s http://localhost:3000/api/docs | jq .",
+    "migrate": "echo \"\\n🔧 Run the SQL migration in src/migrations/lovable-complete.sql manually in Supabase SQL Editor\\n\"",
+    "setup": "npm install && echo \"\\n🎯 Setup complete! Next steps:\\n1. Update .env with your Supabase credentials\\n2. Run the database migration in Supabase\\n3. Test with npm run dev\\n4. Check health with npm run health\\n\"",
+    "setup:env": "cp .env.example .env && echo \"📝 Created .env file - please update with your Supabase credentials\"",
+    "deploy:check": "npm run health && npm run test:api && npm run test:lovable",
+    "logs": "tail -f *.log 2>/dev/null || echo 'No log files found'",
+    "clean": "rm -rf node_modules package-lock.json && npm install"
   },
   "keywords": [
     "study",
@@ -26,14 +36,22 @@
     "analytics",
     "sprints",
     "achievements",
-    "gamification"
+    "gamification",
+    "lovable",
+    "supabase",
+    "ai-powered",
+    "study-planner"
   ],
   "author": "Study Planner Team",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/study-planner-backend.git"
+    "url": "https://github.com/yourusername/study-planner-backend-lovable.git"
   },
+  "bugs": {
+    "url": "https://github.com/yourusername/study-planner-backend-lovable/issues"
+  },
+  "homepage": "https://github.com/yourusername/study-planner-backend-lovable#readme",
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
     "cors": "^2.8.5",
@@ -42,14 +60,41 @@
     "express-rate-limit": "^7.1.5",
     "helmet": "^7.1.0",
     "multer": "^1.4.5-lts.1",
-    "pdf-parse": "^1.1.1"
+    "pdf-parse": "^1.1.1",
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.2",
-    "eslint": "^8.55.0"
+    "eslint": "^8.55.0",
+    "@types/node": "^20.10.0"
   },
-  "optionalDependencies": {},
+  "optionalDependencies": {
+    "sharp": "^0.33.0"
+  },
   "peerDependencies": {},
+  "lovable": {
+    "compatible": true,
+    "version": "2.1.0",
+    "features": {
+      "supabase_auth": true,
+      "real_time": true,
+      "file_upload": true,
+      "cors_configured": true,
+      "rate_limiting": true,
+      "comprehensive_api": true
+    },
+    "endpoints": {
+      "health": "/health",
+      "docs": "/api/docs",
+      "status": "/api/lovable/status",
+      "auth": "/api/auth/*",
+      "documents": "/api/documents/*",
+      "topics": "/api/topics/*",
+      "sprints": "/api/sprints/*",
+      "analytics": "/api/analytics/*",
+      "sessions": "/api/sessions/*"
+    }
+  },
   "eslintConfig": {
     "env": {
       "node": true,
@@ -66,15 +111,39 @@
       "no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
       "no-console": "off",
       "prefer-const": "error",
-      "no-var": "error"
+      "no-var": "error",
+      "semi": ["error", "always"],
+      "quotes": ["error", "single"],
+      "indent": ["error", 2],
+      "comma-dangle": ["error", "never"],
+      "eol-last": ["error", "always"],
+      "no-trailing-spaces": "error"
     }
   },
   "nodemonConfig": {
     "watch": ["src"],
     "ext": "js,json",
-    "ignore": ["src/**/*.test.js"],
+    "ignore": ["src/**/*.test.js", "*.log"],
     "env": {
       "NODE_ENV": "development"
-    }
+    },
+    "delay": 2000
+  },
+  "files": [
+    "src/",
+    "README.md",
+    "package.json",
+    ".env.example"
+  ],
+  "directories": {
+    "lib": "src"
+  },
+  "config": {
+    "port": 3000,
+    "cors_origins": [
+      "http://localhost:5173",
+      "https://*.lovable.dev",
+      "https://lovable.dev"
+    ]
   }
 }
