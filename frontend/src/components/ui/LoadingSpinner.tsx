@@ -1,42 +1,35 @@
+// src/components/ui/LoadingSpinner.tsx
 import React from 'react';
-import { clsx } from 'clsx';
+import { cn } from '../../lib/utils';
 
 interface LoadingSpinnerProps {
   size?: 'sm' | 'md' | 'lg';
-  className?: string;
   text?: string;
+  className?: string;
 }
 
-const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ 
-  size = 'md', 
+const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
+  size = 'md',
+  text,
   className,
-  text 
 }) => {
   const sizeClasses = {
-    sm: 'h-4 w-4',
-    md: 'h-6 w-6',
-    lg: 'h-8 w-8',
-  };
-
-  const textSizeClasses = {
-    sm: 'text-sm',
-    md: 'text-base',
-    lg: 'text-lg',
+    sm: 'w-4 h-4',
+    md: 'w-6 h-6',
+    lg: 'w-8 h-8',
   };
 
   return (
-    <div className={clsx('flex items-center justify-center', className)}>
+    <div className={cn('flex items-center justify-center', className)}>
       <div className="flex flex-col items-center space-y-2">
         <div
-          className={clsx(
-            'animate-spin border-2 border-primary-200 border-t-primary-600 rounded-full',
+          className={cn(
+            'animate-spin rounded-full border-2 border-gray-300 border-t-blue-600',
             sizeClasses[size]
           )}
         />
         {text && (
-          <p className={clsx('text-gray-600', textSizeClasses[size])}>
-            {text}
-          </p>
+          <span className="text-sm text-gray-600 font-medium">{text}</span>
         )}
       </div>
     </div>

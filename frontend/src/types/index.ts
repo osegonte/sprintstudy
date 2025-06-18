@@ -1,3 +1,4 @@
+// src/types/index.ts
 // CineStudy Type Definitions
 
 export interface User {
@@ -8,10 +9,11 @@ export interface User {
   avatar_url?: string;
   preferences?: UserPreferences;
   created_at: string;
+  email_confirmed?: boolean;
 }
 
 export interface UserPreferences {
-  theme: 'light' | 'dark';
+  theme: 'light' | 'dark' | 'system';
   notifications: {
     email: boolean;
     push: boolean;
@@ -32,16 +34,21 @@ export interface UserPreferences {
 }
 
 export interface UserStats {
+  user_id?: string;
   total_pages_read: number;
   total_time_spent_seconds: number;
   average_reading_speed_seconds: number;
   total_documents: number;
+  total_study_sessions?: number;
   current_streak_days: number;
   longest_streak_days: number;
   total_xp_points: number;
   current_level: number;
   focus_score_average: number;
   productivity_score?: number;
+  last_activity_date?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Topic {
@@ -66,6 +73,8 @@ export interface Document {
   id: string;
   title: string;
   file_name: string;
+  file_path?: string;
+  file_size?: number;
   total_pages: number;
   difficulty_level: number;
   estimated_reading_time_minutes: number;
@@ -73,10 +82,16 @@ export interface Document {
   priority: number;
   created_at: string;
   updated_at: string;
+  topic_id?: string;
   topic?: Topic;
+  topic_name?: string;
   completed_pages?: number;
   completion_percentage?: number;
   total_time_spent_seconds?: number;
+  current_page?: number;
+  processing_metadata?: any;
+  is_processing?: boolean;
+  processing_error?: string;
   reading_metrics?: {
     reading_velocity_pages_per_hour: number;
     average_time_per_page_seconds: number;
@@ -88,6 +103,7 @@ export interface Document {
 
 export interface StudySession {
   id: string;
+  user_id: string;
   document_id: string;
   topic_id?: string;
   sprint_id?: string;
@@ -99,6 +115,10 @@ export interface StudySession {
   pages_covered: number;
   starting_page?: number;
   ending_page?: number;
+  tab_switches?: number;
+  app_minimized_count?: number;
+  inactivity_periods?: number;
+  longest_focus_streak_seconds?: number;
   focus_score?: number;
   comprehension_rating?: number;
   difficulty_rating?: number;
@@ -106,28 +126,40 @@ export interface StudySession {
   session_type: 'reading' | 'review' | 'practice' | 'exam_prep';
   completion_status: 'completed' | 'interrupted' | 'abandoned';
   notes?: string;
+  pause_data?: any;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Sprint {
   id: string;
+  user_id: string;
   title: string;
   document_id: string;
   topic_id?: string;
+  exam_goal_id?: string;
   start_page: number;
   end_page: number;
   estimated_time_seconds: number;
   actual_time_seconds?: number;
   target_date: string;
+  target_start_time?: string;
+  target_end_time?: string;
   status: 'pending' | 'in_progress' | 'completed' | 'skipped' | 'failed';
   difficulty_level: number;
   sprint_type: 'reading' | 'review' | 'practice';
   auto_generated: boolean;
+  generation_strategy?: string;
   completion_quality?: number;
   pages_actually_completed?: number;
+  breaks_taken?: number;
+  focus_score?: number;
   created_at: string;
   started_at?: string;
   completed_at?: string;
+  updated_at?: string;
   document?: Document;
+  topic?: Topic;
 }
 
 export interface Achievement {
@@ -141,12 +173,72 @@ export interface Achievement {
   requirement_value: number;
   points: number;
   rarity: 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
+  is_active?: boolean;
   is_earned?: boolean;
   earned_at?: string;
   current_progress?: number;
   progress_percentage?: number;
   is_close?: boolean;
   is_new?: boolean;
+  created_at?: string;
+}
+
+export interface ExamGoal {
+  id: string;
+  user_id: string;
+  topic_id?: string;
+  title: string;
+  description?: string;
+  exam_date: string;
+  target_score?: string;
+  study_hours_per_day: number;
+  difficulty_level: number;
+  is_completed: boolean;
+  actual_score?: string;
+  notes?: string;
+  created_at: string;
+  updated_at?: string;
+  topic?: Topic;
+  time_metrics?: {
+    days_until_exam: number;
+    required_pages_per_day: number;
+    required_study_time_seconds_per_day: number;
+    urgency_level: 'low' | 'medium' | 'high' | 'critical' | 'overdue';
+    on_track: boolean;
+    target_completion_rate: number;
+    current_completion_rate: number;
+  };
+}
+
+export interface RecentActivity {
+  id: string;
+  document_title: string;
+  topic_name?: string;
+  topic_color?: string;
+  duration_minutes: number;
+  pages_covered: number;
+  focus_score?: number;
+  date: string;
+  description?: string;
+  created_at: string;
+}
+
+export interface Insight {
+  type: 'performance' | 'consistency' | 'urgency' | 'speed' | 'trend';
+  icon: string;
+  title: string;
+  message: string;
+  action?: string;
+  recommendation?: string;
+}
+
+export interface Recommendation {
+  type: 'timing' | 'exam_prep' | 'consistency' | 'speed';
+  icon: string;
+  title: string;
+  description: string;
+  action: string;
+  priority: 'critical' | 'high' | 'medium' | 'low';
 }
 
 export interface DashboardData {
@@ -177,52 +269,13 @@ export interface DashboardData {
   topics: Topic[];
   recent_activity: RecentActivity[];
   achievements: Achievement[];
+  trends?: {
+    reading_velocity: any[];
+    weekly_summary: any;
+    monthly_goals: any;
+  };
   insights: Insight[];
   recommendations: Recommendation[];
-}
-
-export interface ExamGoal {
-  id: string;
-  title: string;
-  description?: string;
-  exam_date: string;
-  topic_id?: string;
-  target_score?: string;
-  study_hours_per_day: number;
-  difficulty_level: number;
-  is_completed: boolean;
-  actual_score?: string;
-  notes?: string;
-  created_at: string;
-  topic?: Topic;
-}
-
-export interface RecentActivity {
-  id: string;
-  document_title: string;
-  topic_name?: string;
-  topic_color?: string;
-  duration_minutes: number;
-  pages_covered: number;
-  focus_score?: number;
-  date: string;
-}
-
-export interface Insight {
-  type: 'performance' | 'consistency' | 'urgency' | 'speed' | 'trend';
-  icon: string;
-  title: string;
-  message: string;
-  action?: string;
-}
-
-export interface Recommendation {
-  type: 'timing' | 'exam_prep' | 'consistency' | 'speed';
-  icon: string;
-  title: string;
-  description: string;
-  action: string;
-  priority: 'critical' | 'high' | 'medium' | 'low';
 }
 
 export interface ApiResponse<T> {
@@ -246,7 +299,7 @@ export interface SignupRequest {
 
 export interface AuthResponse {
   user: User;
-  session: {
+  session?: {
     access_token: string;
     refresh_token: string;
     expires_at: number;
@@ -255,6 +308,8 @@ export interface AuthResponse {
   refresh_token?: string;
   expires_at?: number;
   message?: string;
+  stats?: UserStats;
+  lovable_ready?: boolean;
 }
 
 export interface ConnectionTestResult {
