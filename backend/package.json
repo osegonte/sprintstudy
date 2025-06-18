@@ -81,47 +81,47 @@
   "homepage": "https://github.com/yourusername/study-planner-backend-enhanced#readme",
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
-    "express": "^4.18.2",
-    "cors": "^2.8.5",
-    "helmet": "^7.1.0",
-    "express-rate-limit": "^7.1.5",
-    "dotenv": "^16.3.1",
-    "multer": "^1.4.5-lts.1",
-    "pdf-parse": "^1.1.1",
-    "compression": "^1.7.4",
-    "morgan": "^1.10.0",
-    "jsonwebtoken": "^9.0.2",
     "bcryptjs": "^2.4.3",
-    "joi": "^17.11.0",
-    "express-validator": "^7.0.1",
-    "express-slow-down": "^2.0.1",
+    "compression": "^1.8.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
     "express-fileupload": "^1.4.3",
+    "express-rate-limit": "^7.1.5",
+    "express-slow-down": "^2.0.1",
+    "express-validator": "^7.0.1",
+    "helmet": "^7.1.0",
+    "joi": "^17.11.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "multer": "^1.4.5-lts.1",
     "node-cron": "^3.0.3",
+    "pdf-parse": "^1.1.1",
     "winston": "^3.11.0",
     "winston-daily-rotate-file": "^4.7.1"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2",
-    "jest": "^29.7.0",
-    "supertest": "^6.3.3",
+    "@types/node": "^20.10.0",
+    "cross-env": "^7.0.3",
     "eslint": "^8.55.0",
     "eslint-config-airbnb-base": "^15.0.0",
     "eslint-plugin-import": "^2.29.0",
     "eslint-plugin-jest": "^27.6.0",
     "eslint-plugin-security": "^1.7.1",
-    "prettier": "^3.1.0",
     "husky": "^8.0.3",
+    "jest": "^29.7.0",
     "lint-staged": "^15.2.0",
-    "swagger-jsdoc": "^6.2.8",
-    "swagger-ui-express": "^5.0.0",
     "newman": "^6.0.0",
+    "nodemon": "^3.0.2",
+    "prettier": "^3.1.0",
     "snyk": "^1.1259.0",
-    "@types/node": "^20.10.0",
-    "cross-env": "^7.0.3"
+    "supertest": "^6.3.3",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.0"
   },
   "optionalDependencies": {
-    "sharp": "^0.33.0",
-    "pm2": "^5.3.0"
+    "pm2": "^5.3.0",
+    "sharp": "^0.33.0"
   },
   "peerDependencies": {
     "react": ">=16.8.0",
@@ -250,7 +250,12 @@
   },
   "frontend": {
     "compatible": true,
-    "frameworks": ["React", "Vue", "Angular", "Svelte"],
+    "frameworks": [
+      "React",
+      "Vue",
+      "Angular",
+      "Svelte"
+    ],
     "features": {
       "cors": true,
       "authentication": true,
@@ -273,7 +278,7 @@
     },
     "platforms": [
       "Railway",
-      "Heroku", 
+      "Heroku",
       "Vercel",
       "AWS",
       "Digital Ocean"

@@ -1,17 +1,14 @@
+// frontend/src/context/AuthContext.tsx
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { authAPI, setAuthToken } from '../services/api';
-import { User, UserStats, AuthResponse, LoginRequest, SignupRequest } from '../types';
 import toast from 'react-hot-toast';
 
 interface AuthContextType {
-  user: User | null;
-  userStats: UserStats | null;
+  user: any | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (credentials: LoginRequest) => Promise<void>;
-  signup: (userData: SignupRequest) => Promise<void>;
+  login: (credentials: any) => Promise<void>;
   logout: () => Promise<void>;
-  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -24,27 +21,19 @@ export const useAuth = () => {
   return context;
 };
 
-interface AuthProviderProps {
-  children: ReactNode;
-}
-
-export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [userStats, setUserStats] = useState<UserStats | null>(null);
+export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<any | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const isAuthenticated = !!user;
-
-  // Check for existing session on mount
   useEffect(() => {
-    const checkExistingSession = async () => {
+    const checkAuth = async () => {
       const token = localStorage.getItem('cinestudy_token');
       if (token) {
         setAuthToken(token);
         try {
-          await refreshUser();
+          const userData = await authAPI.getCurrentUser();
+          setUser(userData.user);
         } catch (error) {
-          console.error('Failed to refresh user session:', error);
           localStorage.removeItem('cinestudy_token');
           setAuthToken(null);
         }
@@ -52,80 +41,38 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setIsLoading(false);
     };
 
-    checkExistingSession();
+    checkAuth();
   }, []);
 
-  const login = async (credentials: LoginRequest) => {
+  const login = async (credentials: any) => {
     try {
-      setIsLoading(true);
-      const response: AuthResponse = await authAPI.login(credentials);
+      const response = await authAPI.login(credentials);
       setUser(response.user);
-      // Stats might be included in auth response or fetched separately
-      if ('stats' in response) {
-        setUserStats((response as any).stats);
-      }
+      toast.success('Login successful!');
     } catch (error: any) {
-      console.error('Login error:', error);
       toast.error(error.message || 'Login failed');
       throw error;
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const signup = async (userData: SignupRequest) => {
-    try {
-      setIsLoading(true);
-      const response: AuthResponse = await authAPI.signup(userData);
-      setUser(response.user);
-      if ('stats' in response) {
-        setUserStats((response as any).stats);
-      }
-    } catch (error: any) {
-      console.error('Signup error:', error);
-      toast.error(error.message || 'Signup failed');
-      throw error;
-    } finally {
-      setIsLoading(false);
     }
   };
 
   const logout = async () => {
     try {
       await authAPI.logout();
+      setUser(null);
+      toast.success('Logged out successfully');
     } catch (error) {
       console.error('Logout error:', error);
-    } finally {
-      setUser(null);
-      setUserStats(null);
-      setAuthToken(null);
     }
-  };
-
-  const refreshUser = async () => {
-    try {
-      const response = await authAPI.getCurrentUser();
-      setUser(response.user);
-      setUserStats(response.stats);
-    } catch (error: any) {
-      console.error('Refresh user error:', error);
-      throw error;
-    }
-  };
-
-  const value: AuthContextType = {
-    user,
-    userStats,
-    isAuthenticated,
-    isLoading,
-    login,
-    signup,
-    logout,
-    refreshUser,
   };
 
   return (
-    <AuthContext.Provider value={value}>
+    <AuthContext.Provider value={{
+      user,
+      isAuthenticated: !!user,
+      isLoading,
+      login,
+      logout
+    }}>
       {children}
     </AuthContext.Provider>
   );
