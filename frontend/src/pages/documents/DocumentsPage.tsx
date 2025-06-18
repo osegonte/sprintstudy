@@ -57,7 +57,7 @@ const UploadModal: React.FC<UploadModalProps> = ({
     priority: 3,
     notes: ''
   });
-  const [uploadProgress, setUploadProgress] = useState<{ [key: string]: number }>({});
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -99,15 +99,19 @@ const UploadModal: React.FC<UploadModalProps> = ({
     }
 
     try {
+      // Create FileList from selected files
       const fileList = selectedFiles.reduce((dt, file) => {
         dt.items.add(file);
         return dt;
       }, new DataTransfer()).files;
 
       await onUpload(fileList, formData);
-      onClose();
+      
+      // Reset form
       setSelectedFiles([]);
       setFormData({ title: '', topic_id: '', priority: 3, notes: '' });
+      setUploadProgress(0);
+      onClose();
     } catch (error) {
       console.error('Upload error:', error);
     }
@@ -191,6 +195,22 @@ const UploadModal: React.FC<UploadModalProps> = ({
                       </Button>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* Upload Progress */}
+            {isUploading && (
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>Uploading...</span>
+                  <span>{uploadProgress}%</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div
+                    className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${uploadProgress}%` }}
+                  />
                 </div>
               </div>
             )}
@@ -475,20 +495,29 @@ const DocumentsPage: React.FC = () => {
     return filtered;
   }, [documents, searchQuery, selectedTopic, sortBy]);
 
-  // Upload handler
+  // Upload handler with proper error handling
   const handleUpload = async (files: FileList, metadata: any) => {
     setIsUploading(true);
     try {
-      const uploadPromises = Array.from(files).map(file =>
-        documentsAPI.upload(file, metadata)
-      );
+      const uploadPromises = Array.from(files).map(async (file) => {
+        const uploadMetadata = {
+          title: metadata.title || file.name.replace('.pdf', ''),
+          topic_id: metadata.topic_id || '',
+          priority: metadata.priority || 3,
+          notes: metadata.notes || ''
+        };
+        
+        return documentsAPI.upload(file, uploadMetadata);
+      });
 
-      await Promise.all(uploadPromises);
+      const results = await Promise.all(uploadPromises);
       toast.success(`${files.length} document(s) uploaded successfully!`);
-      loadData();
-    } catch (error) {
+      await loadData(); // Refresh the document list
+      
+    } catch (error: any) {
       console.error('Upload error:', error);
-      toast.error('Upload failed');
+      toast.error(error.message || 'Upload failed');
+      throw error; // Re-throw to let the modal handle it
     } finally {
       setIsUploading(false);
     }
@@ -508,7 +537,7 @@ const DocumentsPage: React.FC = () => {
       try {
         await documentsAPI.delete(document.id);
         toast.success('Document deleted successfully');
-        loadData();
+        await loadData(); // Refresh the document list
       } catch (error) {
         console.error('Delete error:', error);
         toast.error('Failed to delete document');
