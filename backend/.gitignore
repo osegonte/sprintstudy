@@ -54,3 +54,5 @@ build/
 *.db
 *.sqlite
 *.sqlite3
+.nyc_output
+.cache
