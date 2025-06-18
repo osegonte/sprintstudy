@@ -7,14 +7,14 @@ const authMiddleware = require('../middleware/auth');
 
 const router = express.Router();
 
-// Start page reading session
+// Start page reading session with enhanced tracking
 router.post('/start-page/:document_id/:page_number', authMiddleware, async (req, res) => {
   try {
     const { document_id, page_number } = req.params;
     const { session_id } = req.body;
     const userId = req.user.id;
 
-    console.log(`⏱️ Starting page timer: User ${userId}, Doc ${document_id}, Page ${page_number}`);
+    console.log(`⏱️ Starting enhanced page timer: User ${userId}, Doc ${document_id}, Page ${page_number}`);
 
     // Validate document ownership
     const { data: document, error: docError } = await supabase
@@ -36,7 +36,7 @@ router.post('/start-page/:document_id/:page_number', authMiddleware, async (req,
       });
     }
 
-    // Get or create page tracking record
+    // Get or create page tracking record with estimated time
     const { data: existingPage, error: pageError } = await supabase
       .from('document_pages')
       .select('*')
@@ -45,9 +45,29 @@ router.post('/start-page/:document_id/:page_number', authMiddleware, async (req,
       .eq('user_id', userId)
       .single();
 
-    if (pageError && pageError.code !== 'PGRST116') {
-      console.error('Error fetching page:', pageError);
-      return res.status(500).json({ error: 'Failed to fetch page data' });
+    let estimatedTime = 120; // Default 2 minutes
+
+    // Get estimated time from PDF analysis if available
+    const { data: pageAnalysis } = await supabase
+      .from('pdf_content_analysis')
+      .select('estimated_reading_seconds')
+      .eq('document_id', document_id)
+      .eq('page_number', pageNum)
+      .single();
+
+    if (pageAnalysis?.estimated_reading_seconds) {
+      estimatedTime = pageAnalysis.estimated_reading_seconds;
+    } else {
+      // Fallback to user's average speed
+      const { data: userStats } = await supabase
+        .from('user_stats')
+        .select('average_reading_speed_seconds')
+        .eq('user_id', userId)
+        .single();
+      
+      if (userStats?.average_reading_speed_seconds) {
+        estimatedTime = userStats.average_reading_speed_seconds;
+      }
     }
 
     // Create page tracking record if it doesn't exist
@@ -60,7 +80,7 @@ router.post('/start-page/:document_id/:page_number', authMiddleware, async (req,
           page_number: pageNum,
           time_spent_seconds: 0,
           is_completed: false,
-          estimated_time_seconds: 120, // Default 2 minutes
+          estimated_time_seconds: estimatedTime,
           created_at: new Date().toISOString()
         });
 
@@ -70,226 +90,127 @@ router.post('/start-page/:document_id/:page_number', authMiddleware, async (req,
       }
     }
 
-    // Record the start time in page_reading_sessions table
-    const { data: readingSession, error: sessionError } = await supabase
-      .from('page_reading_sessions')
-      .insert({
-        user_id: userId,
-        document_id,
-        page_number: pageNum,
-        session_id,
-        started_at: new Date().toISOString(),
-        is_active: true
-      })
-      .select()
-      .single();
-
-    if (sessionError) {
-      console.error('Error creating reading session:', sessionError);
-      return res.status(500).json({ error: 'Failed to start page session' });
-    }
-
-    // Get user's average reading speed for this document/difficulty
+    // Get user's reading performance for context
     const avgSpeed = await getUserAverageSpeedForPage(userId, document_id, pageNum);
 
     res.json({
-      message: 'Page reading session started',
-      session: readingSession,
+      message: 'Enhanced page reading session started',
       page_info: {
         document_title: document.title,
         page_number: pageNum,
         total_pages: document.total_pages,
-        estimated_time_seconds: avgSpeed,
+        estimated_time_seconds: estimatedTime,
+        user_average_seconds: avgSpeed,
         current_progress: Math.round((pageNum / document.total_pages) * 100)
+      },
+      session_context: {
+        start_time: new Date().toISOString(),
+        session_id: session_id || `session_${Date.now()}`,
+        tracking_active: true
       }
     });
   } catch (error) {
-    console.error('Start page session error:', error);
+    console.error('Start enhanced page session error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Update page reading progress (called periodically)
-router.patch('/update-progress/:session_id', authMiddleware, async (req, res) => {
+// Enhanced page completion with detailed time tracking
+router.post('/complete-page/:document_id/:page_number', authMiddleware, async (req, res) => {
   try {
-    const { session_id } = req.params;
+    const { document_id, page_number } = req.params;
     const { 
-      current_time_seconds, 
-      activity_level = 1.0,
-      scroll_events = 0,
-      focus_events = 0,
-      pause_count = 0
-    } = req.body;
-
-    const userId = req.user.id;
-
-    // Get active session
-    const { data: session, error: sessionError } = await supabase
-      .from('page_reading_sessions')
-      .select('*')
-      .eq('id', session_id)
-      .eq('user_id', userId)
-      .eq('is_active', true)
-      .single();
-
-    if (sessionError || !session) {
-      return res.status(404).json({ error: 'Active session not found' });
-    }
-
-    // Calculate elapsed time
-    const startTime = new Date(session.started_at);
-    const now = new Date();
-    const elapsedSeconds = Math.floor((now - startTime) / 1000);
-
-    // Update session with current progress
-    const { error: updateError } = await supabase
-      .from('page_reading_sessions')
-      .update({
-        current_time_seconds: elapsedSeconds,
-        activity_level,
-        scroll_events,
-        focus_events,
-        pause_count,
-        last_activity_at: now.toISOString(),
-        updated_at: now.toISOString()
-      })
-      .eq('id', session_id)
-      .eq('user_id', userId);
-
-    if (updateError) {
-      console.error('Error updating session:', updateError);
-      return res.status(500).json({ error: 'Failed to update session' });
-    }
-
-    // Generate real-time feedback
-    const feedback = await generatePageReadingFeedback(
-      userId, 
-      session.document_id, 
-      session.page_number, 
-      elapsedSeconds,
-      activity_level
-    );
-
-    res.json({
-      message: 'Progress updated',
-      elapsed_seconds: elapsedSeconds,
-      feedback: feedback,
-      activity_metrics: {
-        activity_level,
-        scroll_events,
-        focus_events,
-        pause_count
-      }
-    });
-  } catch (error) {
-    console.error('Update progress error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Complete page reading session
-router.post('/complete-page/:session_id', authMiddleware, async (req, res) => {
-  try {
-    const { session_id } = req.params;
-    const { 
+      actual_time_seconds,
       comprehension_rating,
       difficulty_rating,
       notes,
-      completed_reading = true
+      reading_interruptions = 0,
+      focus_score = 1.0
     } = req.body;
 
     const userId = req.user.id;
+    const pageNum = parseInt(page_number);
 
-    // Get active session
-    const { data: session, error: sessionError } = await supabase
-      .from('page_reading_sessions')
-      .select('*')
-      .eq('id', session_id)
-      .eq('user_id', userId)
-      .eq('is_active', true)
-      .single();
-
-    if (sessionError || !session) {
-      return res.status(404).json({ error: 'Active session not found' });
+    if (!actual_time_seconds || actual_time_seconds < 0) {
+      return res.status(400).json({ error: 'actual_time_seconds is required and must be positive' });
     }
 
-    // Calculate final elapsed time
-    const startTime = new Date(session.started_at);
-    const endTime = new Date();
-    const totalTimeSeconds = Math.floor((endTime - startTime) / 1000);
+    console.log(`✅ Completing page ${pageNum} with ${actual_time_seconds}s reading time`);
 
-    // Update page_reading_sessions
-    const { error: sessionUpdateError } = await supabase
-      .from('page_reading_sessions')
-      .update({
-        ended_at: endTime.toISOString(),
-        total_time_seconds: totalTimeSeconds,
-        is_active: false,
-        comprehension_rating,
-        difficulty_rating,
-        notes: notes?.trim() || null,
-        updated_at: endTime.toISOString()
-      })
-      .eq('id', session_id);
-
-    if (sessionUpdateError) {
-      console.error('Error updating session:', sessionUpdateError);
-      return res.status(500).json({ error: 'Failed to complete session' });
-    }
-
-    // Update document_pages with accumulated time
-    const { data: currentPage, error: pageError } = await supabase
+    // Update document_pages with accumulated time and completion
+    const { data: updatedPage, error: pageUpdateError } = await supabase
       .from('document_pages')
-      .select('time_spent_seconds, is_completed')
-      .eq('document_id', session.document_id)
-      .eq('page_number', session.page_number)
+      .update({
+        time_spent_seconds: actual_time_seconds,
+        is_completed: true,
+        last_read_at: new Date().toISOString(),
+        difficulty_rating: difficulty_rating || null,
+        comprehension_rating: comprehension_rating || null,
+        notes: notes?.trim() || null,
+        updated_at: new Date().toISOString()
+      })
+      .eq('document_id', document_id)
+      .eq('page_number', pageNum)
       .eq('user_id', userId)
+      .select()
       .single();
 
-    if (!pageError && currentPage) {
-      const newTotalTime = (currentPage.time_spent_seconds || 0) + totalTimeSeconds;
-      
-      const { error: pageUpdateError } = await supabase
-        .from('document_pages')
-        .update({
-          time_spent_seconds: newTotalTime,
-          is_completed: completed_reading || currentPage.is_completed,
-          last_read_at: endTime.toISOString(),
-          difficulty_rating: difficulty_rating || null,
-          comprehension_rating: comprehension_rating || null,
-          notes: notes?.trim() || null,
-          updated_at: endTime.toISOString()
-        })
-        .eq('document_id', session.document_id)
-        .eq('page_number', session.page_number)
-        .eq('user_id', userId);
-
-      if (pageUpdateError) {
-        console.error('Error updating page:', pageUpdateError);
-      }
+    if (pageUpdateError) {
+      console.error('Error updating page:', pageUpdateError);
+      return res.status(500).json({ error: 'Failed to update page progress' });
     }
 
     // Update user reading speed statistics
-    await updateUserReadingSpeed(userId, totalTimeSeconds, 1);
+    await updateUserReadingSpeedFromPage(userId, actual_time_seconds);
 
     // Calculate remaining time for document
-    const remainingTimeEstimate = await calculateRemainingTime(userId, session.document_id);
+    const remainingTimeEstimate = await calculateDocumentRemainingTime(userId, document_id);
 
-    // Check for achievements
-    const achievements = await checkPageReadingAchievements(userId, session, totalTimeSeconds);
+    // Generate performance feedback
+    const performanceFeedback = await generatePagePerformanceFeedback(
+      userId, 
+      document_id, 
+      pageNum, 
+      actual_time_seconds,
+      comprehension_rating,
+      focus_score
+    );
+
+    // Check if document is now complete
+    const { data: documentProgress } = await supabase
+      .from('document_pages')
+      .select('is_completed')
+      .eq('document_id', document_id)
+      .eq('user_id', userId);
+
+    const totalPages = documentProgress?.length || 0;
+    const completedPages = documentProgress?.filter(p => p.is_completed).length || 0;
+    const documentCompleted = totalPages > 0 && completedPages === totalPages;
+
+    if (documentCompleted) {
+      console.log(`🎉 Document ${document_id} completed!`);
+      // Award completion bonus or trigger achievement
+      await handleDocumentCompletion(userId, document_id);
+    }
 
     res.json({
       message: 'Page reading completed successfully! 📖',
-      session_summary: {
-        total_time_seconds: totalTimeSeconds,
-        page_number: session.page_number,
+      page_summary: {
+        page_number: pageNum,
+        actual_time_seconds: actual_time_seconds,
         comprehension_rating,
         difficulty_rating,
-        reading_speed_wpm: calculateWordsPerMinute(totalTimeSeconds)
+        reading_speed_wpm: calculateWordsPerMinute(actual_time_seconds)
       },
-      document_progress: remainingTimeEstimate,
-      achievements: achievements,
-      performance_insights: generatePerformanceInsights(totalTimeSeconds, comprehension_rating, userId)
+      document_progress: {
+        completed_pages: completedPages,
+        total_pages: totalPages,
+        completion_percentage: Math.round((completedPages / totalPages) * 100),
+        document_completed: documentCompleted,
+        ...remainingTimeEstimate
+      },
+      performance_feedback: performanceFeedback,
+      next_recommendations: generateNextPageRecommendations(pageNum, totalPages, performanceFeedback)
     });
   } catch (error) {
     console.error('Complete page session error:', error);
@@ -297,104 +218,158 @@ router.post('/complete-page/:session_id', authMiddleware, async (req, res) => {
   }
 });
 
-// Get reading time estimates for document or all documents
-router.get('/estimates/:document_id?', authMiddleware, async (req, res) => {
+// Get comprehensive reading time estimates for all documents
+router.get('/estimates/all', authMiddleware, async (req, res) => {
   try {
-    const { document_id } = req.params;
-    const { include_completed = false } = req.query;
     const userId = req.user.id;
+    const { include_completed = false } = req.query;
 
-    if (document_id) {
-      // Get estimates for specific document
-      const estimate = await calculateRemainingTime(userId, document_id, include_completed === 'true');
-      res.json({ document_estimate: estimate });
-    } else {
-      // Get estimates for all user documents
-      const { data: documents, error } = await supabase
-        .from('documents')
-        .select('id, title, total_pages')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
+    console.log(`📊 Calculating comprehensive time estimates for user ${userId}`);
 
-      if (error) {
-        return res.status(500).json({ error: 'Failed to fetch documents' });
-      }
+    // Get all user documents with progress
+    const { data: documents, error } = await supabase
+      .from('documents')
+      .select(`
+        id,
+        title,
+        total_pages,
+        topic_id,
+        difficulty_level,
+        topics (
+          name,
+          color
+        )
+      `)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
 
-      const estimates = await Promise.all(
-        documents.map(async (doc) => {
-          const estimate = await calculateRemainingTime(userId, doc.id, include_completed === 'true');
-          return {
-            document_id: doc.id,
-            document_title: doc.title,
-            total_pages: doc.total_pages,
-            ...estimate
-          };
-        })
-      );
-
-      // Calculate total remaining time across all documents
-      const totalRemainingSeconds = estimates.reduce((sum, est) => sum + est.remaining_time_seconds, 0);
-      const totalCompletedPages = estimates.reduce((sum, est) => sum + est.completed_pages, 0);
-      const totalPages = estimates.reduce((sum, est) => sum + est.total_pages, 0);
-
-      res.json({
-        document_estimates: estimates,
-        overall_summary: {
-          total_documents: documents.length,
-          total_pages: totalPages,
-          completed_pages: totalCompletedPages,
-          completion_percentage: totalPages > 0 ? Math.round((totalCompletedPages / totalPages) * 100) : 0,
-          total_remaining_time_seconds: totalRemainingSeconds,
-          total_remaining_time_formatted: formatDuration(totalRemainingSeconds),
-          estimated_completion_date: calculateEstimatedCompletionDate(totalRemainingSeconds, userId)
-        }
-      });
+    if (error) {
+      return res.status(500).json({ error: 'Failed to fetch documents' });
     }
+
+    // Calculate estimates for each document
+    const documentEstimates = await Promise.all(
+      documents.map(async (doc) => {
+        const estimate = await calculateDocumentRemainingTime(userId, doc.id, include_completed === 'true');
+        
+        return {
+          document_id: doc.id,
+          document_title: doc.title,
+          topic: doc.topics,
+          difficulty_level: doc.difficulty_level,
+          ...estimate
+        };
+      })
+    );
+
+    // Calculate totals across all documents
+    const totalStats = documentEstimates.reduce((acc, doc) => ({
+      total_documents: acc.total_documents + 1,
+      total_pages: acc.total_pages + doc.total_pages,
+      completed_pages: acc.completed_pages + doc.completed_pages,
+      total_time_spent_seconds: acc.total_time_spent_seconds + doc.total_time_spent_seconds,
+      total_remaining_seconds: acc.total_remaining_seconds + doc.remaining_time_seconds
+    }), {
+      total_documents: 0,
+      total_pages: 0,
+      completed_pages: 0,
+      total_time_spent_seconds: 0,
+      total_remaining_seconds: 0
+    });
+
+    // Calculate completion date based on user's study patterns
+    const estimatedCompletionDate = await calculateGlobalCompletionDate(userId, totalStats.total_remaining_seconds);
+
+    // Group by topic for better organization
+    const byTopic = documentEstimates.reduce((acc, doc) => {
+      const topicName = doc.topic?.name || 'Uncategorized';
+      if (!acc[topicName]) {
+        acc[topicName] = {
+          topic_info: doc.topic,
+          documents: [],
+          topic_totals: {
+            total_pages: 0,
+            completed_pages: 0,
+            remaining_seconds: 0
+          }
+        };
+      }
+      acc[topicName].documents.push(doc);
+      acc[topicName].topic_totals.total_pages += doc.total_pages;
+      acc[topicName].topic_totals.completed_pages += doc.completed_pages;
+      acc[topicName].topic_totals.remaining_seconds += doc.remaining_time_seconds;
+      return acc;
+    }, {});
+
+    res.json({
+      overall_summary: {
+        ...totalStats,
+        overall_completion_percentage: totalStats.total_pages > 0 
+          ? Math.round((totalStats.completed_pages / totalStats.total_pages) * 100) 
+          : 0,
+        total_remaining_time_formatted: formatDuration(totalStats.total_remaining_seconds),
+        estimated_completion_date: estimatedCompletionDate,
+        average_daily_study_recommendation: await calculateDailyStudyRecommendation(userId, totalStats.total_remaining_seconds)
+      },
+      documents: documentEstimates,
+      by_topic: byTopic,
+      study_insights: await generateStudyInsights(userId, documentEstimates)
+    });
   } catch (error) {
-    console.error('Get estimates error:', error);
+    console.error('Get comprehensive estimates error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Get reading session history for a page
-router.get('/history/:document_id/:page_number', authMiddleware, async (req, res) => {
+// Get detailed time breakdown for a specific document
+router.get('/estimates/:document_id/detailed', authMiddleware, async (req, res) => {
   try {
-    const { document_id, page_number } = req.params;
-    const { limit = 10 } = req.query;
+    const { document_id } = req.params;
     const userId = req.user.id;
 
-    const { data: sessions, error } = await supabase
-      .from('page_reading_sessions')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('document_id', document_id)
-      .eq('page_number', parseInt(page_number))
-      .eq('is_active', false)
-      .order('started_at', { ascending: false })
-      .limit(parseInt(limit));
-
-    if (error) {
-      console.error('Error fetching session history:', error);
-      return res.status(500).json({ error: 'Failed to fetch session history' });
+    const detailedEstimate = await calculateDetailedDocumentEstimate(userId, document_id);
+    
+    if (!detailedEstimate.success) {
+      return res.status(404).json({ error: detailedEstimate.error });
     }
 
-    // Calculate statistics
-    const stats = sessions.length > 0 ? {
-      total_sessions: sessions.length,
-      total_time_seconds: sessions.reduce((sum, s) => sum + (s.total_time_seconds || 0), 0),
-      average_time_seconds: Math.round(sessions.reduce((sum, s) => sum + (s.total_time_seconds || 0), 0) / sessions.length),
-      best_time_seconds: Math.min(...sessions.map(s => s.total_time_seconds || Infinity)),
-      average_comprehension: sessions.filter(s => s.comprehension_rating).length > 0 
-        ? Math.round(sessions.reduce((sum, s) => sum + (s.comprehension_rating || 0), 0) / sessions.filter(s => s.comprehension_rating).length * 10) / 10
-        : null
-    } : null;
+    res.json(detailedEstimate);
+  } catch (error) {
+    console.error('Get detailed estimates error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Update reading pace in real-time (for live estimates)
+router.post('/update-pace/:document_id/:page_number', authMiddleware, async (req, res) => {
+  try {
+    const { document_id, page_number } = req.params;
+    const { current_time_seconds, is_focused = true } = req.body;
+    const userId = req.user.id;
+
+    // Generate real-time feedback and pace estimates
+    const realTimeFeedback = await generateRealTimeReadingFeedback(
+      userId,
+      document_id,
+      parseInt(page_number),
+      current_time_seconds,
+      is_focused
+    );
+
+    // Update live estimates for remaining time
+    const updatedEstimates = await calculateLiveRemainingTime(userId, document_id, current_time_seconds);
 
     res.json({
-      sessions: sessions,
-      statistics: stats
+      real_time_feedback: realTimeFeedback,
+      updated_estimates: updatedEstimates,
+      current_pace: {
+        current_time_seconds,
+        pace_status: realTimeFeedback.pace_status,
+        estimated_completion_for_page: realTimeFeedback.estimated_completion
+      }
     });
   } catch (error) {
-    console.error('Get session history error:', error);
+    console.error('Update pace error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -412,15 +387,15 @@ async function getUserAverageSpeedForPage(userId, documentId, pageNumber) {
       .eq('user_id', userId)
       .single();
 
-    // Get difficulty-specific estimate if available
+    // Get page-specific estimate if available
     const { data: pageAnalysis } = await supabase
       .from('pdf_content_analysis')
-      .select('estimated_reading_seconds, difficulty_level')
+      .select('estimated_reading_seconds')
       .eq('document_id', documentId)
       .eq('page_number', pageNumber)
       .single();
 
-    if (pageAnalysis) {
+    if (pageAnalysis?.estimated_reading_seconds) {
       return pageAnalysis.estimated_reading_seconds;
     }
 
@@ -431,179 +406,107 @@ async function getUserAverageSpeedForPage(userId, documentId, pageNumber) {
   }
 }
 
-async function generatePageReadingFeedback(userId, documentId, pageNumber, elapsedSeconds, activityLevel) {
-  try {
-    const userAverage = await getUserAverageSpeedForPage(userId, documentId, pageNumber);
-    const difference = elapsedSeconds - userAverage;
-    
-    let feedbackType = 'neutral';
-    let message = '';
-    let icon = '📖';
-
-    if (Math.abs(difference) <= 15) {
-      feedbackType = 'perfect';
-      icon = '🎯';
-      message = 'Perfect pace! You\'re right on track.';
-    } else if (difference < -30) {
-      feedbackType = 'fast';
-      icon = '⚡';
-      message = `Great speed! You're ${Math.abs(Math.round(difference))}s faster than your average.`;
-    } else if (difference < -15) {
-      feedbackType = 'good';
-      icon = '👍';
-      message = 'Good pace! You\'re reading efficiently.';
-    } else if (difference <= 60) {
-      feedbackType = 'slow';
-      icon = '🐢';
-      message = 'Take your time to understand. Comprehension matters more than speed.';
-    } else {
-      feedbackType = 'very_slow';
-      icon = '🤔';
-      message = 'This seems challenging. Consider taking notes or re-reading if needed.';
-    }
-
-    // Activity level adjustments
-    if (activityLevel < 0.6) {
-      message += ' Try to minimize distractions for better focus.';
-    } else if (activityLevel > 0.9) {
-      message += ' Great focus level!';
-    }
-
-    return {
-      type: feedbackType,
-      icon: icon,
-      message: message,
-      comparison: {
-        current_time: elapsedSeconds,
-        user_average: userAverage,
-        difference_seconds: difference,
-        pace_description: difference < -15 ? 'faster than usual' :
-                         difference > 30 ? 'slower than usual' : 'typical pace'
-      }
-    };
-  } catch (error) {
-    console.error('Error generating feedback:', error);
-    return {
-      type: 'neutral',
-      icon: '📖',
-      message: 'Keep reading at your own pace!',
-      comparison: null
-    };
-  }
-}
-
-async function calculateRemainingTime(userId, documentId, includeCompleted = false) {
+async function calculateDocumentRemainingTime(userId, documentId, includeCompleted = false) {
   try {
     // Get document info
     const { data: document } = await supabase
       .from('documents')
-      .select('id, title, total_pages')
+      .select('id, title, total_pages, difficulty_level')
       .eq('id', documentId)
       .eq('user_id', userId)
       .single();
 
     if (!document) {
-      throw new Error('Document not found');
+      return { error: 'Document not found' };
     }
 
-    // Get page progress
+    // Get all page progress
     const { data: pages } = await supabase
       .from('document_pages')
-      .select('page_number, time_spent_seconds, is_completed, estimated_time_seconds')
+      .select(`
+        page_number, 
+        time_spent_seconds, 
+        is_completed, 
+        estimated_time_seconds,
+        difficulty_rating
+      `)
       .eq('document_id', documentId)
       .eq('user_id', userId)
       .order('page_number');
 
-    // Get user's average reading speed
+    // Get user's current reading speed
     const { data: userStats } = await supabase
       .from('user_stats')
       .select('average_reading_speed_seconds')
       .eq('user_id', userId)
       .single();
 
-    const avgSpeed = userStats?.average_reading_speed_seconds || 120;
+    const userAvgSpeed = userStats?.average_reading_speed_seconds || 120;
 
-    // Calculate progress
-    const completedPages = pages?.filter(p => p.is_completed).length || 0;
+    // Calculate metrics
     const totalPages = document.total_pages;
-    const remainingPages = totalPages - completedPages;
-
-    // Calculate time spent
+    const completedPages = pages?.filter(p => p.is_completed).length || 0;
     const totalTimeSpent = pages?.reduce((sum, p) => sum + (p.time_spent_seconds || 0), 0) || 0;
 
-    // Estimate remaining time using multiple methods
+    // Calculate remaining time using multiple approaches
     let remainingTimeSeconds = 0;
-
+    
     if (pages && pages.length > 0) {
       // Method 1: Use estimated times for unread pages
-      remainingTimeSeconds = pages
-        .filter(p => !p.is_completed)
-        .reduce((sum, p) => sum + (p.estimated_time_seconds || avgSpeed), 0);
+      const unreadPages = pages.filter(p => !p.is_completed);
+      
+      remainingTimeSeconds = unreadPages.reduce((sum, page) => {
+        // Use estimated time if available, otherwise use user average
+        const estimatedTime = page.estimated_time_seconds || userAvgSpeed;
+        
+        // Adjust for difficulty if known
+        if (page.difficulty_rating) {
+          const difficultyMultiplier = {
+            1: 0.8, 2: 0.9, 3: 1.0, 4: 1.2, 5: 1.4
+          }[page.difficulty_rating] || 1.0;
+          return sum + (estimatedTime * difficultyMultiplier);
+        }
+        
+        return sum + estimatedTime;
+      }, 0);
     } else {
-      // Method 2: Use average speed for all remaining pages
-      remainingTimeSeconds = remainingPages * avgSpeed;
+      // Fallback: estimate all remaining pages
+      const remainingPages = totalPages - completedPages;
+      remainingTimeSeconds = remainingPages * userAvgSpeed;
     }
 
-    // Adjust based on user's actual reading speed if we have data
+    // Adjust based on user's actual performance if we have data
     if (completedPages > 0 && totalTimeSpent > 0) {
       const actualAvgSpeed = totalTimeSpent / completedPages;
-      const speedRatio = actualAvgSpeed / avgSpeed;
-      remainingTimeSeconds = Math.round(remainingTimeSeconds * speedRatio);
+      const speedRatio = actualAvgSpeed / userAvgSpeed;
+      
+      // Blend actual performance with estimates (70% actual, 30% estimates)
+      if (speedRatio > 0.1 && speedRatio < 10) { // Sanity check
+        remainingTimeSeconds = Math.round(remainingTimeSeconds * (0.7 * speedRatio + 0.3));
+      }
     }
 
     return {
+      success: true,
       document_id: documentId,
       document_title: document.title,
       total_pages: totalPages,
       completed_pages: completedPages,
-      remaining_pages: remainingPages,
+      remaining_pages: totalPages - completedPages,
       completion_percentage: Math.round((completedPages / totalPages) * 100),
       total_time_spent_seconds: totalTimeSpent,
       remaining_time_seconds: Math.max(0, remainingTimeSeconds),
       remaining_time_formatted: formatDuration(remainingTimeSeconds),
-      estimated_completion_date: calculateEstimatedCompletionDate(remainingTimeSeconds, userId)
+      estimated_completion_date: await calculateCompletionDate(userId, remainingTimeSeconds),
+      reading_velocity: completedPages > 0 ? Math.round((completedPages / (totalTimeSpent / 3600)) * 10) / 10 : 0 // pages per hour
     };
   } catch (error) {
     console.error('Error calculating remaining time:', error);
-    return {
-      error: 'Failed to calculate remaining time'
-    };
+    return { success: false, error: 'Failed to calculate remaining time' };
   }
 }
 
-function formatDuration(seconds) {
-  if (seconds <= 0) return '0 minutes';
-  
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  } else {
-    return `${minutes}m`;
-  }
-}
-
-function calculateEstimatedCompletionDate(remainingSeconds, userId) {
-  // This would use user's study patterns to estimate completion
-  // For now, assume 1 hour of reading per day
-  const assumedDailyStudySeconds = 3600; // 1 hour
-  const daysNeeded = Math.ceil(remainingSeconds / assumedDailyStudySeconds);
-  
-  const completionDate = new Date();
-  completionDate.setDate(completionDate.getDate() + daysNeeded);
-  
-  return completionDate.toISOString().split('T')[0];
-}
-
-function calculateWordsPerMinute(timeSeconds) {
-  // Rough estimate: 250 words per page, adjust based on time
-  const assumedWordsPerPage = 250;
-  const minutes = timeSeconds / 60;
-  return minutes > 0 ? Math.round(assumedWordsPerPage / minutes) : 0;
-}
-
-async function updateUserReadingSpeed(userId, timeSeconds, pagesRead) {
+async function updateUserReadingSpeedFromPage(userId, timeSeconds) {
   try {
     const { data: currentStats } = await supabase
       .from('user_stats')
@@ -612,9 +515,9 @@ async function updateUserReadingSpeed(userId, timeSeconds, pagesRead) {
       .single();
 
     if (currentStats) {
-      const newTotalPages = currentStats.total_pages_read + pagesRead;
+      const newTotalPages = currentStats.total_pages_read + 1;
       const newTotalTime = currentStats.total_time_spent_seconds + timeSeconds;
-      const newAvgSpeed = newTotalPages > 0 ? newTotalTime / newTotalPages : currentStats.average_reading_speed_seconds;
+      const newAvgSpeed = newTotalTime / newTotalPages;
 
       await supabase
         .from('user_stats')
@@ -625,32 +528,181 @@ async function updateUserReadingSpeed(userId, timeSeconds, pagesRead) {
           updated_at: new Date().toISOString()
         })
         .eq('user_id', userId);
+
+      console.log(`📊 Updated user reading speed: ${Math.round(newAvgSpeed)}s/page`);
     }
   } catch (error) {
     console.error('Error updating user reading speed:', error);
   }
 }
 
-async function checkPageReadingAchievements(userId, session, timeSeconds) {
-  // This would check for various achievements
-  // Implementation would depend on existing achievement system
-  return [];
+function formatDuration(seconds) {
+  if (seconds <= 0) return '0 minutes';
+  
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  
+  if (hours >= 24) {
+    const days = Math.floor(hours / 24);
+    const remainingHours = hours % 24;
+    return `${days}d ${remainingHours}h`;
+  } else if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  } else {
+    return `${minutes}m`;
+  }
 }
 
-function generatePerformanceInsights(timeSeconds, comprehensionRating, userId) {
-  const insights = [];
-  
-  if (timeSeconds < 60) {
-    insights.push('⚡ Lightning fast! You completed this page quickly.');
-  } else if (timeSeconds > 300) {
-    insights.push('🔍 Deep reading detected. You took time to understand the content.');
+function calculateWordsPerMinute(timeSeconds) {
+  // Rough estimate: 250 words per page
+  const assumedWordsPerPage = 250;
+  const minutes = timeSeconds / 60;
+  return minutes > 0 ? Math.round(assumedWordsPerPage / minutes) : 0;
+}
+
+async function calculateCompletionDate(userId, remainingSeconds) {
+  try {
+    // Get user's study patterns to estimate daily study time
+    const { data: recentSessions } = await supabase
+      .from('study_sessions')
+      .select('total_duration_seconds, started_at')
+      .eq('user_id', userId)
+      .gte('started_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()) // Last 30 days
+      .order('started_at', { ascending: false })
+      .limit(20);
+
+    let dailyStudyTime = 3600; // Default 1 hour per day
+
+    if (recentSessions && recentSessions.length > 0) {
+      const totalTime = recentSessions.reduce((sum, s) => sum + (s.total_duration_seconds || 0), 0);
+      const uniqueDays = new Set(recentSessions.map(s => s.started_at.split('T')[0])).size;
+      
+      if (uniqueDays > 0) {
+        dailyStudyTime = totalTime / uniqueDays;
+      }
+    }
+
+    const daysNeeded = Math.ceil(remainingSeconds / dailyStudyTime);
+    const completionDate = new Date();
+    completionDate.setDate(completionDate.getDate() + daysNeeded);
+    
+    return completionDate.toISOString().split('T')[0];
+  } catch (error) {
+    console.warn('Error calculating completion date:', error);
+    const fallbackDays = Math.ceil(remainingSeconds / 3600); // 1 hour per day fallback
+    const completionDate = new Date();
+    completionDate.setDate(completionDate.getDate() + fallbackDays);
+    return completionDate.toISOString().split('T')[0];
   }
-  
-  if (comprehensionRating >= 4) {
-    insights.push('🧠 High comprehension! You understand the material well.');
+}
+
+async function generatePagePerformanceFeedback(userId, documentId, pageNumber, actualTime, comprehension, focusScore) {
+  const expectedTime = await getUserAverageSpeedForPage(userId, documentId, pageNumber);
+  const timeDifference = actualTime - expectedTime;
+  const performanceRatio = expectedTime > 0 ? actualTime / expectedTime : 1;
+
+  let feedback = {
+    speed_feedback: '',
+    comprehension_feedback: '',
+    overall_rating: 'good',
+    improvements: []
+  };
+
+  // Speed feedback
+  if (performanceRatio < 0.8) {
+    feedback.speed_feedback = 'Excellent speed! You read faster than expected.';
+    feedback.overall_rating = 'excellent';
+  } else if (performanceRatio < 1.2) {
+    feedback.speed_feedback = 'Good pace! Right on target.';
+  } else if (performanceRatio < 1.5) {
+    feedback.speed_feedback = 'Taking time to understand - that\'s good for retention.';
+    feedback.improvements.push('Consider active reading techniques to maintain pace');
+  } else {
+    feedback.speed_feedback = 'Slower pace detected. Focus on key concepts.';
+    feedback.overall_rating = 'needs_improvement';
+    feedback.improvements.push('Try skimming first, then detailed reading');
   }
-  
-  return insights;
+
+  // Comprehension feedback
+  if (comprehension >= 4) {
+    feedback.comprehension_feedback = 'Great comprehension! You understand the material well.';
+  } else if (comprehension >= 3) {
+    feedback.comprehension_feedback = 'Good understanding. Keep it up!';
+  } else if (comprehension >= 2) {
+    feedback.comprehension_feedback = 'Consider re-reading or taking notes.';
+    feedback.improvements.push('Try summarizing each section as you read');
+  }
+
+  // Focus score integration
+  if (focusScore < 0.7) {
+    feedback.improvements.push('Try eliminating distractions for better focus');
+  }
+
+  return feedback;
+}
+
+function generateNextPageRecommendations(currentPage, totalPages, performanceFeedback) {
+  const recommendations = [];
+
+  if (currentPage < totalPages) {
+    recommendations.push({
+      action: 'continue_reading',
+      message: `Continue to page ${currentPage + 1}`,
+      estimated_time: '2-3 minutes'
+    });
+  }
+
+  if (performanceFeedback.overall_rating === 'needs_improvement') {
+    recommendations.push({
+      action: 'take_break',
+      message: 'Consider a 5-10 minute break to refocus',
+      estimated_time: '5-10 minutes'
+    });
+  }
+
+  if (currentPage % 5 === 0 && currentPage < totalPages) {
+    recommendations.push({
+      action: 'review_section',
+      message: 'Quick review of the last 5 pages',
+      estimated_time: '3-5 minutes'
+    });
+  }
+
+  return recommendations;
+}
+
+async function handleDocumentCompletion(userId, documentId) {
+  try {
+    // Award completion XP
+    const { data: userStats } = await supabase
+      .from('user_stats')
+      .select('total_xp_points, current_level')
+      .eq('user_id', userId)
+      .single();
+
+    if (userStats) {
+      const completionXP = 50; // Bonus XP for completing a document
+      const newTotalXP = userStats.total_xp_points + completionXP;
+      const newLevel = Math.floor(Math.sqrt(newTotalXP / 100)) + 1;
+
+      await supabase
+        .from('user_stats')
+        .update({
+          total_xp_points: newTotalXP,
+          current_level: newLevel,
+          updated_at: new Date().toISOString()
+        })
+        .eq('user_id', userId);
+
+      console.log(`🎉 Document completion bonus: +${completionXP} XP`);
+    }
+
+    // Check for achievements
+    // This would integrate with your existing achievement system
+    
+  } catch (error) {
+    console.error('Error handling document completion:', error);
+  }
 }
 
 module.exports = router;
