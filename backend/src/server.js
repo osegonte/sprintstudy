@@ -1,166 +1,232 @@
-// Updated server.js to include new time tracking routes
-// Add these lines to your existing backend/src/server.js
+// Load environment variables FIRST - using explicit path from backend directory
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
-// Add the new route imports at the top with your existing imports:
-const pageTimeTrackingRoutes = require('./routes/page-time-tracking');
-const enhancedDashboardRoutes = require('./routes/enhanced-dashboard');
+const express = require('express');
+const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
-// Add the new routes with your existing API routes section:
-app.use('/api/page-tracking', pageTimeTrackingRoutes);
-app.use('/api/dashboard-enhanced', enhancedDashboardRoutes);
+const app = express();
 
-// Also update your existing dashboard route to include basic time info
-// Modify your existing backend/src/routes/dashboard.js by adding this function:
+// Debug environment variables (now should work correctly)
+console.log('🔍 Environment Variables Debug:');
+console.log('NODE_ENV:', process.env.NODE_ENV);
+console.log('PORT:', process.env.PORT);
+console.log('SUPABASE_URL exists:', !!process.env.SUPABASE_URL);
+console.log('SUPABASE_ANON_KEY exists:', !!process.env.SUPABASE_ANON_KEY);
+console.log('SUPABASE_SERVICE_KEY exists:', !!process.env.SUPABASE_SERVICE_KEY);
+console.log('Current working directory:', process.cwd());
+console.log('__dirname:', __dirname);
+console.log('Looking for .env at:', path.join(__dirname, '../.env'));
 
-// Enhanced dashboard endpoint that works with your frontend
-router.get('/time-overview', authMiddleware, async (req, res) => {
-  try {
-    const userId = req.user.id;
+// Import routes and config after dotenv is loaded
+const authRoutes = require('./routes/auth');
+const documentsRoutes = require('./routes/documents');
+const topicsRoutes = require('./routes/topics');
+const progressRoutes = require('./routes/progress');
+const sprintsRoutes = require('./routes/sprints');
+const sessionsRoutes = require('./routes/sessions');
+const analyticsRoutes = require('./routes/analytics');
+const achievementsRoutes = require('./routes/achievements');
+const examGoalsRoutes = require('./routes/exam-goals');
+
+// Check if optional routes exist before requiring them
+let pageTimeTrackingRoutes = null;
+let enhancedDashboardRoutes = null;
+
+try {
+  pageTimeTrackingRoutes = require('./routes/page-time-tracking');
+  console.log('✅ Page time tracking routes loaded');
+} catch (error) {
+  console.log('⚠️ Page time tracking routes not found:', error.message);
+}
+
+try {
+  enhancedDashboardRoutes = require('./routes/dashboard');
+  console.log('✅ Enhanced dashboard routes loaded');
+} catch (error) {
+  console.log('⚠️ Enhanced dashboard routes not found:', error.message);
+}
+
+// Security middleware
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  contentSecurityPolicy: false // Disable CSP for API
+}));
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 1000, // Limit each IP to 1000 requests per windowMs
+  message: 'Too many requests from this IP, please try again later',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api/', limiter);
+
+// CORS configuration - more permissive for development
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, Postman, etc.)
+    if (!origin) return callback(null, true);
     
-    console.log(`📊 Fetching time overview for user ${userId}`);
-
-    // Get all documents with their progress
-    const { data: documents } = await supabase
-      .from('documents')
-      .select(`
-        id,
-        title,
-        total_pages,
-        difficulty_level,
-        estimated_reading_time_minutes,
-        topic_id,
-        topics (
-          name,
-          color,
-          icon
-        ),
-        document_pages (
-          page_number,
-          time_spent_seconds,
-          is_completed,
-          estimated_time_seconds
-        )
-      `)
-      .eq('user_id', userId);
-
-    // Get user reading stats
-    const { data: userStats } = await supabase
-      .from('user_stats')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
-
-    if (!documents) {
-      return res.json({
-        total_reading_time_remaining: 0,
-        total_reading_time_remaining_formatted: '0m',
-        documents: [],
-        user_reading_speed: userStats?.average_reading_speed_seconds || 120
-      });
+    // Allow all localhost origins
+    if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+      return callback(null, true);
     }
+    
+    // Allow Lovable domains
+    if (origin.includes('lovable.dev')) {
+      return callback(null, true);
+    }
+    
+    // Allow specific origins
+    const allowedOrigins = [
+      'http://localhost:5173',
+      'http://localhost:3000',
+      'http://localhost:8080',
+      'http://localhost:4173',
+      'https://lovable.dev',
+      process.env.FRONTEND_URL
+    ].filter(Boolean);
+    
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    
+    // For development, allow all origins
+    if (process.env.NODE_ENV === 'development') {
+      return callback(null, true);
+    }
+    
+    callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  maxAge: 86400
+};
 
-    // Calculate remaining time for each document
-    const documentsWithTime = documents.map(doc => {
-      const pages = doc.document_pages || [];
-      const completedPages = pages.filter(p => p.is_completed);
-      const uncompletedPages = pages.filter(p => !p.is_completed);
-      
-      const timeSpent = completedPages.reduce((sum, p) => sum + (p.time_spent_seconds || 0), 0);
-      
-      // Calculate remaining time
-      let remainingTimeSeconds = 0;
-      if (uncompletedPages.length > 0) {
-        remainingTimeSeconds = uncompletedPages.reduce((sum, page) => {
-          const estimatedTime = page.estimated_time_seconds || userStats?.average_reading_speed_seconds || 120;
-          
-          // Adjust for document difficulty
-          const difficultyMultiplier = {
-            1: 0.8, 2: 0.9, 3: 1.0, 4: 1.2, 5: 1.4
-          }[doc.difficulty_level] || 1.0;
-          
-          return sum + (estimatedTime * difficultyMultiplier);
-        }, 0);
-      }
+app.use(cors(corsOptions));
 
-      return {
-        id: doc.id,
-        title: doc.title,
-        topic: doc.topics,
-        total_pages: doc.total_pages,
-        completed_pages: completedPages.length,
-        completion_percentage: Math.round((completedPages.length / doc.total_pages) * 100),
-        time_spent_seconds: timeSpent,
-        remaining_time_seconds: remainingTimeSeconds,
-        remaining_time_formatted: formatDuration(remainingTimeSeconds)
-      };
-    });
+// Body parsing middleware
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-    // Calculate total remaining time
-    const totalRemainingSeconds = documentsWithTime.reduce((sum, doc) => sum + doc.remaining_time_seconds, 0);
-
-    res.json({
-      total_reading_time_remaining: totalRemainingSeconds,
-      total_reading_time_remaining_formatted: formatDuration(totalRemainingSeconds),
-      documents: documentsWithTime,
-      user_reading_speed: userStats?.average_reading_speed_seconds || 120,
-      summary: {
-        total_documents: documentsWithTime.length,
-        completed_documents: documentsWithTime.filter(d => d.completion_percentage === 100).length,
-        average_completion: Math.round(documentsWithTime.reduce((sum, d) => sum + d.completion_percentage, 0) / documentsWithTime.length),
-        estimated_completion_date: calculateEstimatedCompletionDate(totalRemainingSeconds, userId)
-      }
-    });
-  } catch (error) {
-    console.error('Time overview error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV,
+    port: process.env.PORT || 3000,
+    supabase_configured: !!(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY)
+  });
 });
 
-function formatDuration(seconds) {
-  if (seconds <= 0) return '0m';
-  
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  } else {
-    return `${minutes}m`;
-  }
+// CORS test endpoint
+app.get('/api/cors-test', (req, res) => {
+  res.json({
+    message: 'CORS is working',
+    origin: req.headers.origin,
+    timestamp: new Date().toISOString(),
+    environment_loaded: !!process.env.SUPABASE_URL
+  });
+});
+
+// Test login endpoint for debugging
+app.post('/api/test-login', (req, res) => {
+  res.json({
+    message: 'Test endpoint working',
+    environment_configured: !!process.env.SUPABASE_URL,
+    body_received: !!req.body,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// API routes
+app.use('/api/auth', authRoutes);
+app.use('/api/documents', documentsRoutes);
+app.use('/api/topics', topicsRoutes);
+app.use('/api/progress', progressRoutes);
+app.use('/api/sprints', sprintsRoutes);
+app.use('/api/sessions', sessionsRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/achievements', achievementsRoutes);
+app.use('/api/exam-goals', examGoalsRoutes);
+
+// Optional routes (only if they exist)
+if (pageTimeTrackingRoutes) {
+  app.use('/api/page-tracking', pageTimeTrackingRoutes);
 }
 
-async function calculateEstimatedCompletionDate(remainingSeconds, userId) {
-  try {
-    // Get user's recent study patterns
-    const { data: recentSessions } = await supabase
-      .from('study_sessions')
-      .select('total_duration_seconds, started_at')
-      .eq('user_id', userId)
-      .gte('started_at', new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString()) // Last 14 days
-      .order('started_at', { ascending: false });
+if (enhancedDashboardRoutes) {
+  app.use('/api/dashboard-enhanced', enhancedDashboardRoutes);
+}
 
-    let dailyStudyTime = 3600; // Default 1 hour per day
-
-    if (recentSessions && recentSessions.length > 0) {
-      const totalTime = recentSessions.reduce((sum, s) => sum + (s.total_duration_seconds || 0), 0);
-      const uniqueDays = new Set(recentSessions.map(s => s.started_at.split('T')[0])).size;
-      
-      if (uniqueDays > 0) {
-        dailyStudyTime = totalTime / uniqueDays;
-      }
+// API documentation endpoint
+app.get('/api/docs', (req, res) => {
+  res.json({
+    name: 'Study Planner API',
+    version: '2.1.0',
+    environment: process.env.NODE_ENV,
+    environment_configured: !!process.env.SUPABASE_URL,
+    endpoints: {
+      auth: '/api/auth/*',
+      documents: '/api/documents/*',
+      topics: '/api/topics/*',
+      progress: '/api/progress/*',
+      sprints: '/api/sprints/*',
+      sessions: '/api/sessions/*',
+      analytics: '/api/analytics/*',
+      achievements: '/api/achievements/*',
+      examGoals: '/api/exam-goals/*',
+      ...(pageTimeTrackingRoutes && { pageTracking: '/api/page-tracking/*' }),
+      ...(enhancedDashboardRoutes && { dashboard: '/api/dashboard-enhanced/*' })
+    },
+    cors: {
+      enabled: true,
+      development_mode: process.env.NODE_ENV === 'development'
     }
+  });
+});
 
-    const daysNeeded = Math.ceil(remainingSeconds / dailyStudyTime);
-    const completionDate = new Date();
-    completionDate.setDate(completionDate.getDate() + daysNeeded);
-    
-    return completionDate.toISOString().split('T')[0];
-  } catch (error) {
-    console.warn('Error calculating completion date:', error);
-    // Fallback calculation
-    const fallbackDays = Math.ceil(remainingSeconds / 3600);
-    const completionDate = new Date();
-    completionDate.setDate(completionDate.getDate() + fallbackDays);
-    return completionDate.toISOString().split('T')[0];
-  }
-}
+// Error handling middleware
+app.use((error, req, res, next) => {
+  console.error('💥 Server Error:', error);
+  res.status(500).json({
+    error: 'Internal server error',
+    ...(process.env.NODE_ENV === 'development' && { details: error.message, stack: error.stack })
+  });
+});
+
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({
+    error: 'Route not found',
+    path: req.originalUrl,
+    method: req.method,
+    available_routes: [
+      '/health',
+      '/api/cors-test',
+      '/api/test-login',
+      '/api/docs',
+      '/api/auth/*',
+      '/api/topics/*'
+    ]
+  });
+});
+
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log(`🚀 Study Planner API running on port ${PORT}`);
+  console.log(`📊 Health check: http://localhost:${PORT}/health`);
+  console.log(`📚 API docs: http://localhost:${PORT}/api/docs`);
+  console.log(`🧪 CORS test: http://localhost:${PORT}/api/cors-test`);
+  console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
+  console.log(`🔧 Supabase configured: ${!!(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY)}`);
+});
+
+module.exports = app;
