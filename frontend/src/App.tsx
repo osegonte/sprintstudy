@@ -5,6 +5,7 @@ import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './context/AuthContext';
 import { AppProvider } from './context/AppContext';
 import ProtectedRoute from './components/auth/ProtectedRoute';
+import AppLayout from './components/layout/AppLayout';
 import LoginPage from './pages/auth/LoginPage';
 import SignupPage from './pages/auth/SignupPage';
 import DashboardPage from './pages/dashboard/DashboardPage';
@@ -26,12 +27,14 @@ const App: React.FC = () => {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/signup" element={<SignupPage />} />
               
-              {/* Protected Routes */}
+              {/* Protected Routes with Layout */}
               <Route
                 path="/dashboard"
                 element={
                   <ProtectedRoute>
-                    <DashboardPage />
+                    <AppLayout>
+                      <DashboardPage />
+                    </AppLayout>
                   </ProtectedRoute>
                 }
               />
@@ -39,7 +42,9 @@ const App: React.FC = () => {
                 path="/topics"
                 element={
                   <ProtectedRoute>
-                    <TopicsPage />
+                    <AppLayout>
+                      <TopicsPage />
+                    </AppLayout>
                   </ProtectedRoute>
                 }
               />
@@ -47,7 +52,9 @@ const App: React.FC = () => {
                 path="/documents"
                 element={
                   <ProtectedRoute>
-                    <DocumentsPage />
+                    <AppLayout>
+                      <DocumentsPage />
+                    </AppLayout>
                   </ProtectedRoute>
                 }
               />
@@ -55,7 +62,9 @@ const App: React.FC = () => {
                 path="/analytics"
                 element={
                   <ProtectedRoute>
-                    <AnalyticsPage />
+                    <AppLayout>
+                      <AnalyticsPage />
+                    </AppLayout>
                   </ProtectedRoute>
                 }
               />
@@ -63,7 +72,9 @@ const App: React.FC = () => {
                 path="/settings"
                 element={
                   <ProtectedRoute>
-                    <SettingsPage />
+                    <AppLayout>
+                      <SettingsPage />
+                    </AppLayout>
                   </ProtectedRoute>
                 }
               />
