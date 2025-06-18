@@ -363,6 +363,6 @@ export const analyticsAPI = {
   },
 };
 
-// Export the configured API instance and utilities
-export { api, setAuthToken };
+// Export the configured API instance (removed duplicate setAuthToken export)
+export { api };
 export default api;
