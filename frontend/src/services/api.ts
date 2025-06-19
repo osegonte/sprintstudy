@@ -1,6 +1,5 @@
-// frontend/src/services/api.ts
+// src/services/api.ts - Fixed version
 import axios, { AxiosResponse, AxiosError } from 'axios';
-import toast from 'react-hot-toast';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
 
@@ -33,90 +32,38 @@ if (authToken) {
   setAuthToken(authToken);
 }
 
-// Response interceptor with fallback
+// Add the missing testConnection function
+export const testConnection = async () => {
+  try {
+    const response = await fetch(API_BASE_URL.replace('/api', '/health'));
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Connection test failed:', error);
+    throw error;
+  }
+};
+
+// Response interceptor with better error handling
 api.interceptors.response.use(
   (response: AxiosResponse) => response,
   (error: AxiosError) => {
     console.error('API Error:', error);
     
-    // If backend unavailable, provide mock data
-    if (error.code === 'ERR_NETWORK' || error.message.includes('ECONNREFUSED')) {
-      console.log('🔄 Backend unavailable, using mock data');
-      return handleMockResponse(error.config);
-    }
-    
     if (error.response?.status === 401) {
       setAuthToken(null);
-      window.location.href = '/login';
+      // Only redirect if we're not already on the login page
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
     }
     
     return Promise.reject(error);
   }
 );
-
-// Mock data handler
-const handleMockResponse = (config: any) => {
-  const method = config.method?.toUpperCase();
-  const url = config.url;
-  
-  // Mock responses based on endpoint
-  if (url.includes('/auth/login')) {
-    return Promise.resolve({
-      data: {
-        user: { id: '1', email: 'demo@example.com', username: 'demo' },
-        access_token: 'demo_token_' + Date.now()
-      }
-    });
-  }
-  
-  if (url.includes('/documents')) {
-    return Promise.resolve({
-      data: {
-        documents: [
-          {
-            id: '1',
-            title: 'React Fundamentals',
-            total_pages: 45,
-            completion_percentage: 65,
-            topic: { id: '1', name: 'Programming', color: '#3B82F6' }
-          }
-        ]
-      }
-    });
-  }
-  
-  if (url.includes('/topics')) {
-    return Promise.resolve({
-      data: {
-        topics: [
-          {
-            id: '1',
-            name: 'Programming',
-            color: '#3B82F6',
-            completion_percentage: 45,
-            total_documents: 3
-          }
-        ]
-      }
-    });
-  }
-  
-  if (url.includes('/analytics/dashboard')) {
-    return Promise.resolve({
-      data: {
-        overview: {
-          total_documents: 5,
-          completed_pages: 156,
-          total_time_spent_seconds: 14400,
-          current_level: 3
-        },
-        recent_activity: []
-      }
-    });
-  }
-  
-  return Promise.resolve({ data: {} });
-};
 
 // API methods
 export const authAPI = {
@@ -136,6 +83,8 @@ export const authAPI = {
   async logout() {
     try {
       await api.post('/auth/logout');
+    } catch (error) {
+      console.warn('Logout request failed:', error);
     } finally {
       setAuthToken(null);
     }
