@@ -2,7 +2,7 @@
 const express = require('express');
 const multer = require('multer');
 const { supabase } = require('../config/supabase');
-const authMiddleware = require('../middleware/auth');
+const { authMiddleware } = require('../middleware/auth'); // FIXED: Destructured import
 const PDFProcessorService = require('../services/pdfProcessor');
 
 const router = express.Router();
@@ -279,7 +279,7 @@ router.post('/upload', authMiddleware, upload.single('pdf'), async (req, res) =>
   }
 });
 
-// Enhanced document listing with intelligent filters - FIXED VERSION
+// Enhanced document listing with intelligent filters
 router.get('/', authMiddleware, async (req, res) => {
   try {
     const { 
@@ -612,7 +612,7 @@ router.delete('/:id', authMiddleware, async (req, res) => {
 });
 
 // ========================================
-// FIXED HELPER FUNCTIONS (moved outside of router)
+// HELPER FUNCTIONS (moved outside of router)
 // ========================================
 
 function calculateSuggestedSessionLength(document, pages) {
