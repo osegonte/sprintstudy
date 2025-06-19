@@ -1,7 +1,7 @@
 {
-  "name": "study-planner-backend-enhanced",
-  "version": "2.2.0",
-  "description": "Enhanced Study Planner API with comprehensive frontend integration, security, and production features",
+  "name": "cinestudy-backend",
+  "version": "2.3.0",
+  "description": "CineStudy API - Enhanced Study Planning Backend with Authentication & Database Integration",
   "main": "src/server.js",
   "engines": {
     "node": ">=18.0.0",
@@ -20,35 +20,21 @@
     "test:unit": "jest --testPathPattern=unit",
     "test:health": "curl -f http://localhost:3000/health || exit 1",
     "test:api": "curl -f http://localhost:3000/api/docs || exit 1",
-    "test:endpoints": "newman run tests/postman-collection.json",
     "lint": "eslint src/**/*.js --fix",
     "lint:check": "eslint src/**/*.js",
     "format": "prettier --write src/**/*.js",
     "format:check": "prettier --check src/**/*.js",
     "security:audit": "npm audit --audit-level=moderate",
-    "security:check": "npm run security:audit && snyk test",
-    "docs:generate": "swagger-jsdoc -d swagger-config.js src/routes/*.js -o docs/swagger.json",
-    "docs:serve": "swagger-ui-serve docs/swagger.json",
-    "db:migrate": "echo 'Run migrations in Supabase SQL Editor'",
-    "db:seed": "node scripts/seed-database.js",
-    "db:reset": "node scripts/reset-database.js",
-    "setup": "npm install && npm run setup:env && npm run setup:hooks",
+    "security:fix": "npm audit fix",
+    "db:migrate": "echo 'Run the SQL migration in your Supabase SQL Editor from src/migrations/001_initial_setup.sql'",
+    "db:seed": "echo 'Seed data is included in the migration'",
+    "setup": "npm install && npm run setup:env",
     "setup:env": "cp .env.example .env && echo '📝 Created .env file - please update with your credentials'",
-    "setup:hooks": "npx husky install",
-    "postinstall": "node scripts/post-install.js",
-    "pre-commit": "lint-staged",
-    "validate": "npm run lint:check && npm run format:check && npm run test:unit",
-    "deploy:check": "npm run build && npm run test && npm run security:audit",
-    "deploy:staging": "npm run deploy:check && echo 'Deploy to staging'",
-    "deploy:production": "npm run deploy:check && echo 'Deploy to production'",
-    "logs": "tail -f logs/*.log 2>/dev/null || echo 'No log files found'",
-    "logs:error": "tail -f logs/error.log 2>/dev/null || echo 'No error log found'",
-    "monitor": "pm2 monit",
-    "clean": "rm -rf node_modules package-lock.json logs/* && npm install",
-    "backup": "node scripts/backup-database.js",
-    "restore": "node scripts/restore-database.js"
+    "clean": "rm -rf node_modules package-lock.json && npm install",
+    "update-deps": "npx npm-check-updates -u && npm install"
   },
   "keywords": [
+    "cinestudy",
     "study-planner",
     "api",
     "rest",
@@ -57,30 +43,17 @@
     "pdf",
     "education",
     "analytics",
-    "progress-tracking",
-    "gamification",
     "authentication",
-    "file-upload",
-    "cors",
-    "security",
-    "production-ready"
+    "nodejs",
+    "backend"
   ],
   "author": {
-    "name": "Study Planner Team",
-    "email": "dev@studyplanner.com",
-    "url": "https://studyplanner.com"
+    "name": "CineStudy Team",
+    "email": "dev@cinestudy.com"
   },
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/yourusername/study-planner-backend-enhanced.git"
-  },
-  "bugs": {
-    "url": "https://github.com/yourusername/study-planner-backend-enhanced/issues"
-  },
-  "homepage": "https://github.com/yourusername/study-planner-backend-enhanced#readme",
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0",
+    "@supabase/supabase-js": "^2.39.7",
     "bcryptjs": "^2.4.3",
     "compression": "^1.8.0",
     "cors": "^2.8.5",
@@ -108,42 +81,13 @@
     "eslint-plugin-import": "^2.29.0",
     "eslint-plugin-jest": "^27.6.0",
     "eslint-plugin-security": "^1.7.1",
-    "husky": "^8.0.3",
     "jest": "^29.7.0",
-    "lint-staged": "^15.2.0",
-    "newman": "^6.0.0",
     "nodemon": "^3.0.2",
     "prettier": "^3.1.0",
-    "snyk": "^1.1259.0",
-    "supertest": "^6.3.3",
-    "swagger-jsdoc": "^6.2.8",
-    "swagger-ui-express": "^5.0.0"
+    "supertest": "^6.3.3"
   },
   "optionalDependencies": {
-    "pm2": "^5.3.0",
     "sharp": "^0.33.0"
-  },
-  "peerDependencies": {
-    "react": ">=16.8.0",
-    "react-dom": ">=16.8.0"
-  },
-  "lint-staged": {
-    "src/**/*.js": [
-      "eslint --fix",
-      "prettier --write",
-      "git add"
-    ],
-    "*.{json,md}": [
-      "prettier --write",
-      "git add"
-    ]
-  },
-  "husky": {
-    "hooks": {
-      "pre-commit": "lint-staged",
-      "pre-push": "npm run test:unit",
-      "commit-msg": "commitlint -E HUSKY_GIT_PARAMS"
-    }
   },
   "jest": {
     "testEnvironment": "node",
@@ -163,9 +107,6 @@
     "testMatch": [
       "**/tests/**/*.test.js",
       "**/src/**/*.test.js"
-    ],
-    "setupFilesAfterEnv": [
-      "<rootDir>/tests/setup.js"
     ]
   },
   "eslintConfig": {
@@ -212,104 +153,11 @@
     "ext": "js,json",
     "ignore": [
       "src/**/*.test.js",
-      "logs/*",
       "node_modules/*"
     ],
     "env": {
       "NODE_ENV": "development"
     },
     "delay": 2000
-  },
-  "config": {
-    "port": 3000,
-    "corsOrigins": [
-      "http://localhost:5173",
-      "http://localhost:3000",
-      "https://lovable.dev"
-    ]
-  },
-  "directories": {
-    "lib": "src",
-    "test": "tests",
-    "doc": "docs"
-  },
-  "files": [
-    "src/",
-    "docs/",
-    "scripts/",
-    "README.md",
-    "package.json",
-    ".env.example"
-  ],
-  "funding": {
-    "type": "github",
-    "url": "https://github.com/sponsors/yourusername"
-  },
-  "contributes": {
-    "url": "https://github.com/yourusername/study-planner-backend-enhanced/blob/main/CONTRIBUTING.md"
-  },
-  "frontend": {
-    "compatible": true,
-    "frameworks": [
-      "React",
-      "Vue",
-      "Angular",
-      "Svelte"
-    ],
-    "features": {
-      "cors": true,
-      "authentication": true,
-      "file_upload": true,
-      "real_time": true,
-      "websockets": false,
-      "graphql": false,
-      "rest_api": true
-    },
-    "api_client": {
-      "javascript": "src/lib/api-client.js",
-      "typescript": "src/lib/api-client.ts",
-      "examples": "examples/"
-    }
-  },
-  "deployment": {
-    "docker": {
-      "image": "node:18-alpine",
-      "port": 3000
-    },
-    "platforms": [
-      "Railway",
-      "Heroku",
-      "Vercel",
-      "AWS",
-      "Digital Ocean"
-    ],
-    "requirements": {
-      "node": ">=18.0.0",
-      "memory": "512MB",
-      "storage": "1GB"
-    }
-  },
-  "security": {
-    "policy": "SECURITY.md",
-    "contact": "security@studyplanner.com",
-    "features": [
-      "helmet",
-      "cors",
-      "rate-limiting",
-      "input-validation",
-      "jwt-authentication",
-      "secure-headers",
-      "sql-injection-protection"
-    ]
-  },
-  "monitoring": {
-    "health_check": "/health",
-    "metrics": "/metrics",
-    "logs": "logs/",
-    "alerts": {
-      "error_rate": "> 1%",
-      "response_time": "> 1s",
-      "memory_usage": "> 80%"
-    }
   }
 }

@@ -1,10 +1,10 @@
 const express = require('express');
 const { supabase, supabaseAdmin } = require('../config/supabase');
-const authMiddleware = require('../middleware/auth');
+const { authMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
 
-// Enhanced signup with comprehensive debugging for Lovable
+// Enhanced signup with comprehensive debugging
 router.post('/signup', async (req, res) => {
   try {
     const { email, password, username, full_name } = req.body;
@@ -57,53 +57,8 @@ router.post('/signup', async (req, res) => {
 
     console.log('✅ User created in Supabase Auth:', data.user?.id);
 
-    // Create user profile with admin client to bypass RLS
-    if (data.user) {
-      try {
-        const { error: profileError } = await supabaseAdmin
-          .from('user_profiles')
-          .insert({
-            id: data.user.id,
-            username: username || email.split('@')[0],
-            full_name: full_name || username || email.split('@')[0],
-            email: email
-          });
-
-        if (profileError) {
-          console.error('⚠️ Profile creation error:', profileError);
-          // Don't fail signup, but log the issue
-        } else {
-          console.log('✅ User profile created');
-        }
-      } catch (profileErr) {
-        console.error('⚠️ Profile creation exception:', profileErr);
-      }
-
-      // Initialize user stats with admin client
-      try {
-        const { error: statsError } = await supabaseAdmin
-          .from('user_stats')
-          .insert({
-            user_id: data.user.id,
-            total_pages_read: 0,
-            total_time_spent_seconds: 0,
-            average_reading_speed_seconds: 120,
-            total_documents: 0,
-            current_streak_days: 0,
-            longest_streak_days: 0,
-            total_xp_points: 0,
-            current_level: 1
-          });
-
-        if (statsError) {
-          console.error('⚠️ Stats initialization error:', statsError);
-        } else {
-          console.log('✅ User stats initialized');
-        }
-      } catch (statsErr) {
-        console.error('⚠️ Stats initialization exception:', statsErr);
-      }
-    }
+    // User profile and stats will be created automatically by the database trigger
+    // No need for manual insertion here
 
     console.log('🎉 Signup completed successfully');
 
@@ -118,19 +73,19 @@ router.post('/signup', async (req, res) => {
       session: data.session,
       access_token: data.session?.access_token,
       refresh_token: data.session?.refresh_token,
-      lovable_ready: true
+      cinestudy_ready: true
     });
   } catch (error) {
     console.error('💥 Signup catch error:', error);
     res.status(500).json({ 
       error: 'Internal server error',
       details: error.message,
-      lovable_debug: true
+      cinestudy_debug: true
     });
   }
 });
 
-// Enhanced login with debugging for Lovable
+// Enhanced login with debugging
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -192,7 +147,7 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    // Get user profile
+    // Get user profile from our custom table
     const { data: profile } = await supabase
       .from('user_profiles')
       .select('username, full_name')
@@ -214,7 +169,7 @@ router.post('/login', async (req, res) => {
       access_token: data.session?.access_token,
       refresh_token: data.session?.refresh_token,
       expires_at: data.session?.expires_at,
-      lovable_ready: true
+      cinestudy_ready: true
     });
   } catch (error) {
     console.error('💥 Login catch error:', error);
@@ -225,46 +180,102 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Get current user info
+// Fixed /me endpoint with proper error handling
 router.get('/me', authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
+    
+    console.log(`👤 Fetching user info for: ${userId}`);
 
     // Get user profile
-    const { data: profile } = await supabase
+    const { data: profile, error: profileError } = await supabase
       .from('user_profiles')
       .select('*')
       .eq('id', userId)
       .single();
 
+    if (profileError) {
+      console.error('Profile fetch error:', profileError);
+      // Create profile if it doesn't exist
+      const { data: createdProfile, error: createError } = await supabase
+        .from('user_profiles')
+        .insert({
+          id: userId,
+          username: req.user.email?.split('@')[0] || 'user',
+          full_name: req.user.user_metadata?.full_name || '',
+          email: req.user.email
+        })
+        .select()
+        .single();
+
+      if (createError) {
+        console.error('Profile creation error:', createError);
+        return res.status(500).json({ error: 'Failed to create user profile' });
+      }
+      
+      console.log('✅ Created missing user profile');
+    }
+
     // Get user stats
-    const { data: stats } = await supabase
+    const { data: stats, error: statsError } = await supabase
       .from('user_stats')
       .select('*')
       .eq('user_id', userId)
       .single();
 
-    res.json({
+    if (statsError) {
+      console.error('Stats fetch error:', statsError);
+      // Create stats if they don't exist
+      const { data: createdStats, error: createStatsError } = await supabase
+        .from('user_stats')
+        .insert({
+          user_id: userId,
+          total_pages_read: 0,
+          total_documents: 0,
+          current_level: 1,
+          total_xp_points: 0
+        })
+        .select()
+        .single();
+
+      if (createStatsError) {
+        console.error('Stats creation error:', createStatsError);
+        return res.status(500).json({ error: 'Failed to create user stats' });
+      }
+      
+      console.log('✅ Created missing user stats');
+    }
+
+    const userData = {
       user: {
         id: req.user.id,
         email: req.user.email,
-        username: profile?.username,
-        full_name: profile?.full_name,
+        username: profile?.username || req.user.email?.split('@')[0],
+        full_name: profile?.full_name || req.user.user_metadata?.full_name,
         avatar_url: profile?.avatar_url,
-        preferences: profile?.preferences,
+        preferences: profile?.preferences || {},
         created_at: req.user.created_at
       },
       stats: stats || {
         total_pages_read: 0,
         total_documents: 0,
         current_level: 1,
-        total_xp_points: 0
+        total_xp_points: 0,
+        current_streak_days: 0,
+        average_reading_speed_seconds: 120
       },
-      lovable_ready: true
-    });
+      cinestudy_ready: true
+    };
+
+    console.log(`✅ User info retrieved successfully for: ${req.user.email}`);
+    res.json(userData);
+    
   } catch (error) {
-    console.error('Get user error:', error);
-    res.status(500).json({ error: 'Failed to fetch user data' });
+    console.error('💥 Get user error:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch user data',
+      details: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
   }
 });
 
@@ -278,6 +289,7 @@ router.post('/logout', authMiddleware, async (req, res) => {
       return res.status(500).json({ error: 'Failed to logout' });
     }
 
+    console.log(`👋 User logged out: ${req.user.email}`);
     res.json({ message: 'Logged out successfully' });
   } catch (error) {
     console.error('Logout error:', error);
@@ -310,6 +322,69 @@ router.post('/refresh', async (req, res) => {
   } catch (error) {
     console.error('Refresh error:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Test login endpoint for development
+router.post('/test-login', async (req, res) => {
+  if (process.env.NODE_ENV !== 'development') {
+    return res.status(404).json({ error: 'Not found' });
+  }
+
+  try {
+    // This creates a test user if it doesn't exist
+    const testEmail = 'test@example.com';
+    const testPassword = 'password123';
+
+    console.log('🧪 Test login attempt...');
+
+    let { data, error } = await supabase.auth.signInWithPassword({
+      email: testEmail,
+      password: testPassword
+    });
+
+    if (error && error.message.includes('Invalid login credentials')) {
+      console.log('🧪 Creating test user...');
+      
+      // Try to create the test user
+      const { data: signupData, error: signupError } = await supabase.auth.signUp({
+        email: testEmail,
+        password: testPassword,
+        options: {
+          data: {
+            username: 'testuser',
+            full_name: 'Test User'
+          }
+        }
+      });
+
+      if (signupError) {
+        console.error('Test user creation failed:', signupError);
+        return res.status(500).json({ error: 'Failed to create test user' });
+      }
+
+      data = signupData;
+      console.log('✅ Test user created');
+    } else if (error) {
+      console.error('Test login failed:', error);
+      return res.status(500).json({ error: 'Test login failed' });
+    }
+
+    console.log('✅ Test login successful');
+    
+    res.json({
+      message: 'Test login successful',
+      user: {
+        id: data.user?.id,
+        email: data.user?.email,
+        username: 'testuser'
+      },
+      access_token: data.session?.access_token,
+      test_mode: true
+    });
+  } catch (error) {
+    console.error('Test login error:', error);
+    res.status(500).json({ error: 'Test login failed' });
   }
 });
 

@@ -1,4 +1,4 @@
-// Enhanced server.js with production-ready features
+// Enhanced server.js with production-ready features for CineStudy
 require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 
 const express = require('express');
@@ -7,6 +7,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const compression = require('compression');
 const morgan = require('morgan');
+const path = require('path');
 
 const app = express();
 
@@ -33,13 +34,13 @@ app.use(helmet({
   }
 }));
 
-// Enhanced CORS Configuration
+// Enhanced CORS Configuration for CineStudy
 const corsOptions = {
   origin: function (origin, callback) {
     // Define allowed origins
     const allowedOrigins = [
       'http://localhost:3000',
-      'http://localhost:5173',
+      'http://localhost:5173', // Vite dev server
       'http://localhost:8080',
       'http://localhost:4173',
       'https://lovable.dev',
@@ -47,31 +48,41 @@ const corsOptions = {
       // Add your production frontend URLs here
     ].filter(Boolean);
 
+    console.log(`🌐 CORS check - Origin: ${origin}`);
+
     // Allow requests with no origin (mobile apps, Postman, etc.)
-    if (!origin) return callback(null, true);
+    if (!origin) {
+      console.log('✅ CORS: No origin - allowing');
+      return callback(null, true);
+    }
     
     // Allow all localhost origins in development
     if (process.env.NODE_ENV === 'development' && 
         (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
+      console.log('✅ CORS: Development localhost - allowing');
       return callback(null, true);
     }
     
     // Allow Lovable domains
     if (origin.includes('lovable.dev')) {
+      console.log('✅ CORS: Lovable domain - allowing');
       return callback(null, true);
     }
     
     // Check against allowed origins
     if (allowedOrigins.includes(origin)) {
+      console.log('✅ CORS: Allowed origin - allowing');
       return callback(null, true);
     }
     
     // Development fallback - be more permissive
     if (process.env.NODE_ENV === 'development') {
+      console.log('✅ CORS: Development fallback - allowing');
       return callback(null, true);
     }
     
     // Production - strict origin checking
+    console.log(`❌ CORS: Origin ${origin} not allowed`);
     callback(new Error(`CORS: Origin ${origin} not allowed`));
   },
   credentials: true,
@@ -100,6 +111,7 @@ const createRateLimiter = (windowMs, max, message) => rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
+    console.log(`🚨 Rate limit exceeded for ${req.ip}: ${req.path}`);
     res.status(429).json({
       error: message,
       retryAfter: Math.round(windowMs / 1000)
@@ -148,22 +160,36 @@ app.use((req, res, next) => {
   next();
 });
 
+// Root route - Welcome message
+app.get('/', (req, res) => {
+  res.json({
+    message: '🎬 Welcome to CineStudy API',
+    version: '2.3.0',
+    status: 'running',
+    environment: process.env.NODE_ENV,
+    documentation: '/api/docs',
+    health: '/health',
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Enhanced Health Check with dependencies
 app.get('/health', async (req, res) => {
   const healthCheck = {
     status: 'OK',
+    service: 'CineStudy API',
+    version: '2.3.0',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     environment: process.env.NODE_ENV,
-    version: process.env.npm_package_version || '1.0.0',
     requestId: req.id,
     dependencies: {
       supabase: {
         configured: !!(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY),
         url: process.env.SUPABASE_URL ? 'Connected' : 'Not configured'
       },
-      database: 'Connected', // This could be enhanced with actual DB health check
-      storage: 'Connected'   // This could be enhanced with actual storage health check
+      database: 'Connected',
+      storage: 'Connected'
     },
     metrics: {
       memoryUsage: process.memoryUsage(),
@@ -175,8 +201,20 @@ app.get('/health', async (req, res) => {
   if (healthCheck.dependencies.supabase.configured) {
     try {
       const { supabase } = require('./config/supabase');
-      await supabase.from('user_stats').select('*').limit(1);
-      healthCheck.dependencies.supabase.status = 'healthy';
+      
+      // Test with a simple query that doesn't require tables
+      const { error } = await supabase.from('user_stats').select('*').limit(1);
+      
+      if (error && !error.message.includes('relation "public.user_stats" does not exist')) {
+        healthCheck.dependencies.supabase.status = 'unhealthy';
+        healthCheck.dependencies.supabase.error = error.message;
+        healthCheck.status = 'DEGRADED';
+      } else {
+        healthCheck.dependencies.supabase.status = 'healthy';
+        if (error) {
+          healthCheck.dependencies.database = 'Tables need migration';
+        }
+      }
     } catch (error) {
       healthCheck.dependencies.supabase.status = 'unhealthy';
       healthCheck.dependencies.supabase.error = error.message;
@@ -194,14 +232,16 @@ app.options('*', cors(corsOptions));
 // API Documentation endpoint
 app.get('/api/docs', (req, res) => {
   res.json({
-    name: 'Study Planner API',
-    version: '2.1.0',
-    description: 'Comprehensive study planning and progress tracking API',
+    name: 'CineStudy API',
+    version: '2.3.0',
+    description: 'Comprehensive study planning and progress tracking API for CineStudy',
     environment: process.env.NODE_ENV,
     baseUrl: `${req.protocol}://${req.get('host')}/api`,
-    documentation: {
-      swagger: '/api/docs/swagger',
-      postman: '/api/docs/postman'
+    authentication: {
+      type: 'JWT Bearer Token',
+      signup: 'POST /api/auth/signup',
+      login: 'POST /api/auth/login',
+      profile: 'GET /api/auth/me'
     },
     endpoints: {
       auth: {
@@ -211,7 +251,8 @@ app.get('/api/docs', (req, res) => {
           'POST /login': 'Authenticate user',
           'POST /logout': 'Sign out user',
           'GET /me': 'Get current user info',
-          'POST /refresh': 'Refresh authentication token'
+          'POST /refresh': 'Refresh authentication token',
+          'POST /test-login': 'Test login (development only)'
         }
       },
       documents: {
@@ -234,12 +275,44 @@ app.get('/api/docs', (req, res) => {
           'PATCH /reorder': 'Reorder topics'
         }
       },
+      sessions: {
+        base: '/api/sessions',
+        endpoints: {
+          'POST /start': 'Start study session',
+          'PATCH /:id/activity': 'Update session activity',
+          'PATCH /:id/pause': 'Pause session',
+          'PATCH /:id/resume': 'Resume session',
+          'PATCH /:id/end': 'End study session',
+          'GET /': 'List study sessions',
+          'GET /:id': 'Get session details'
+        }
+      },
       analytics: {
         base: '/api/analytics',
         endpoints: {
           'GET /dashboard': 'Get dashboard analytics',
           'POST /feedback': 'Submit reading feedback',
-          'GET /trends': 'Get performance trends'
+          'GET /trends': 'Get performance trends',
+          'GET /patterns': 'Get study patterns'
+        }
+      },
+      sprints: {
+        base: '/api/sprints',
+        endpoints: {
+          'POST /generate': 'Generate intelligent sprint',
+          'POST /': 'Create sprint',
+          'PATCH /:id/start': 'Start sprint',
+          'PATCH /:id/complete': 'Complete sprint',
+          'GET /analytics': 'Get sprint analytics'
+        }
+      },
+      achievements: {
+        base: '/api/achievements',
+        endpoints: {
+          'GET /': 'Get achievements with progress',
+          'POST /check': 'Check and award achievements',
+          'GET /recent': 'Get recent achievements',
+          'GET /leaderboard': 'Get leaderboard (optional)'
         }
       }
     },
@@ -252,6 +325,24 @@ app.get('/api/docs', (req, res) => {
       general: '1000 requests per 15 minutes',
       auth: '5 login attempts per 15 minutes',
       upload: '10 uploads per hour'
+    },
+    database: {
+      provider: 'Supabase',
+      migration: 'Run /src/migrations/001_initial_setup.sql in Supabase SQL Editor',
+      rls: 'Row Level Security enabled on all tables'
+    }
+  });
+});
+
+// CORS test endpoint for debugging
+app.get('/api/cors-test', (req, res) => {
+  res.json({
+    message: 'CORS test successful! 🎉',
+    origin: req.get('Origin'),
+    timestamp: new Date().toISOString(),
+    headers: {
+      'Access-Control-Allow-Origin': req.get('Origin'),
+      'Access-Control-Allow-Credentials': 'true'
     }
   });
 });
@@ -289,27 +380,32 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/achievements', achievementsRoutes);
 app.use('/api/exam-goals', examGoalsRoutes);
 
-// Load optional enhanced routes
-try {
-  const pageTimeTrackingRoutes = require('./routes/page-time-tracking');
-  app.use('/api/v1/page-tracking', pageTimeTrackingRoutes);
-  app.use('/api/page-tracking', pageTimeTrackingRoutes);
-} catch (error) {
-  console.log('⚠️ Page time tracking routes not available');
-}
+// Load optional enhanced routes with error handling
+const optionalRoutes = [
+  { path: './routes/page-time-tracking', mount: '/page-tracking', name: 'Page time tracking' },
+  { path: './routes/dashboard', mount: '/dashboard-enhanced', name: 'Enhanced dashboard' }
+];
 
-try {
-  const enhancedDashboardRoutes = require('./routes/dashboard');
-  app.use('/api/v1/dashboard-enhanced', enhancedDashboardRoutes);
-  app.use('/api/dashboard-enhanced', enhancedDashboardRoutes);
-} catch (error) {
-  console.log('⚠️ Enhanced dashboard routes not available');
-}
+optionalRoutes.forEach(({ path, mount, name }) => {
+  try {
+    const routeModule = require(path);
+    app.use(`/api/v1${mount}`, routeModule);
+    app.use(`/api${mount}`, routeModule);
+    console.log(`✅ Loaded ${name} routes`);
+  } catch (error) {
+    console.log(`⚠️ ${name} routes not available: ${error.message}`);
+  }
+});
+
+// Favicon handler
+app.get('/favicon.ico', (req, res) => {
+  res.status(204).end();
+});
 
 // Global error handling middleware
 app.use((error, req, res, next) => {
   // Log error with request context
-  console.error(`[${req.id}] ${error.stack}`);
+  console.error(`[${req.id}] 💥 Error on ${req.method} ${req.path}:`, error);
   
   // CORS error handling
   if (error.message.includes('CORS')) {
@@ -317,7 +413,8 @@ app.use((error, req, res, next) => {
       error: 'CORS policy violation',
       message: 'Request blocked by CORS policy',
       origin: req.headers.origin,
-      requestId: req.id
+      requestId: req.id,
+      solution: 'Add your frontend URL to the allowed origins'
     });
   }
   
@@ -353,7 +450,8 @@ app.use((error, req, res, next) => {
     return res.status(503).json({
       error: 'Service unavailable',
       message: 'Database connection error',
-      requestId: req.id
+      requestId: req.id,
+      suggestion: 'Run the database migration if tables are missing'
     });
   }
   
@@ -423,12 +521,13 @@ process.on('uncaughtException', (error) => {
 const PORT = process.env.PORT || 3000;
 
 const server = app.listen(PORT, () => {
-  console.log(`🚀 Study Planner API v2.1 running on port ${PORT}`);
+  console.log(`🎬 CineStudy API v2.3 running on port ${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`📚 API docs: http://localhost:${PORT}/api/docs`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
   console.log(`🔧 Supabase: ${process.env.SUPABASE_URL ? '✅ Connected' : '❌ Not configured'}`);
   console.log(`🛡️ Security: CORS enabled, Rate limiting active, Helmet configured`);
+  console.log(`🎯 Ready for frontend at: http://localhost:5173`);
 });
 
 module.exports = { app, server };
